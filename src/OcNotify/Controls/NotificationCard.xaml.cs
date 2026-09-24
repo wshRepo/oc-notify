@@ -26,9 +26,6 @@ public partial class NotificationCard : UserControl
     private bool _enterPlayed;
     private bool _exitStarted;
 
-    /// <summary>缓存进入动画的 Storyboard，便于复用与清理。</summary>
-    private Storyboard? _enterStoryboard;
-
     /// <summary>缓存退出动画的 Storyboard，完成后显式清理避免泄漏。</summary>
     private Storyboard? _exitStoryboard;
 
@@ -115,23 +112,10 @@ public partial class NotificationCard : UserControl
             EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
         };
 
-        // 使用 Storyboard 统一管理，便于完成后清理
-        _enterStoryboard = new Storyboard();
-        Storyboard.SetTarget(opacityAnim, this);
-        Storyboard.SetTargetProperty(opacityAnim, new PropertyPath(OpacityProperty));
-        _enterStoryboard.Children.Add(opacityAnim);
-
-        Storyboard.SetTarget(slideAnim, SlideTransform);
-        Storyboard.SetTargetProperty(slideAnim, new PropertyPath(TranslateTransform.YProperty));
-        _enterStoryboard.Children.Add(slideAnim);
-
-        _enterStoryboard.Completed += (_, _) =>
-        {
-            // 动画完成后清理引用，避免 Storyboard 持有卡片
-            _enterStoryboard = null;
-        };
-
-        _enterStoryboard.Begin();
+        // 使用 BeginAnimation 而非 Storyboard：Storyboard 的 FillBehavior 默认 Stop
+        // 会在动画完成后恢复原值，与 SizeToContent 窗口高度计算冲突导致截断
+        BeginAnimation(OpacityProperty, opacityAnim);
+        SlideTransform.BeginAnimation(TranslateTransform.YProperty, slideAnim);
     }
 
     /// <summary>
@@ -213,9 +197,6 @@ public partial class NotificationCard : UserControl
     public void Cleanup()
     {
         // 停止并清理进行中的动画
-        _enterStoryboard?.Stop();
-        _enterStoryboard = null;
-
         _exitStoryboard?.Stop();
         _exitStoryboard = null;
 
