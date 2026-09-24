@@ -99,6 +99,7 @@ public sealed class NotificationManager
 
     /// <summary>
     /// 启动过期计时器；到期触发消失。
+    /// 使用 WeakReference 避免 Task 闭包强引用 item 导致内存泄漏。
     /// </summary>
     /// <param name="item">通知项。</param>
     /// <param name="durationMs">时长。</param>
@@ -114,6 +115,9 @@ public sealed class NotificationManager
         _expiryCts[item] = cts;
         var token = cts.Token;
 
+        // 弱引用：Task 完成后不阻止 item 被 GC 回收
+        var weakItem = new WeakReference<NotificationItem>(item);
+
         _ = Task.Run(async () =>
         {
             try
@@ -125,7 +129,13 @@ public sealed class NotificationManager
                 return;
             }
 
-            await _dispatcher.InvokeAsync(() => TriggerDismiss(item));
+            // 若 item 已被 GC 回收，则跳过
+            if (!weakItem.TryGetTarget(out var target))
+            {
+                return;
+            }
+
+            await _dispatcher.InvokeAsync(() => TriggerDismiss(target));
         }, token);
     }
 

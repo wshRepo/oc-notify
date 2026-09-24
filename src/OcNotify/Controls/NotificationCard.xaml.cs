@@ -26,6 +26,12 @@ public partial class NotificationCard : UserControl
     private bool _enterPlayed;
     private bool _exitStarted;
 
+    /// <summary>缓存进入动画的 Storyboard，便于复用与清理。</summary>
+    private Storyboard? _enterStoryboard;
+
+    /// <summary>缓存退出动画的 Storyboard，完成后显式清理避免泄漏。</summary>
+    private Storyboard? _exitStoryboard;
+
     /// <summary>
     /// 构造：初始化 XAML。
     /// </summary>
@@ -109,8 +115,23 @@ public partial class NotificationCard : UserControl
             EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
         };
 
-        BeginAnimation(OpacityProperty, opacityAnim);
-        SlideTransform.BeginAnimation(System.Windows.Media.TranslateTransform.YProperty, slideAnim);
+        // 使用 Storyboard 统一管理，便于完成后清理
+        _enterStoryboard = new Storyboard();
+        Storyboard.SetTarget(opacityAnim, this);
+        Storyboard.SetTargetProperty(opacityAnim, new PropertyPath(OpacityProperty));
+        _enterStoryboard.Children.Add(opacityAnim);
+
+        Storyboard.SetTarget(slideAnim, SlideTransform);
+        Storyboard.SetTargetProperty(slideAnim, new PropertyPath(TranslateTransform.YProperty));
+        _enterStoryboard.Children.Add(slideAnim);
+
+        _enterStoryboard.Completed += (_, _) =>
+        {
+            // 动画完成后清理引用，避免 Storyboard 持有卡片
+            _enterStoryboard = null;
+        };
+
+        _enterStoryboard.Begin();
     }
 
     /// <summary>
@@ -161,25 +182,45 @@ public partial class NotificationCard : UserControl
             Storyboard.SetTarget(collapseH, this);
             Storyboard.SetTargetProperty(collapseH, new PropertyPath(MaxHeightProperty));
 
-            var sb = new Storyboard();
-            sb.Children.Add(collapseH);
+            _exitStoryboard = new Storyboard();
+            _exitStoryboard.Children.Add(collapseH);
 
             // Margin 动画
             Storyboard.SetTarget(collapseM, this);
             Storyboard.SetTargetProperty(collapseM, new PropertyPath(MarginProperty));
-            sb.Children.Add(collapseM);
+            _exitStoryboard.Children.Add(collapseM);
 
-            sb.Completed += (_, _) =>
+            _exitStoryboard.Completed += (_, _) =>
             {
                 MaxHeight = 0;
                 Margin = new Thickness(0);
+
+                // 清理 Storyboard 引用，避免持有卡片
+                _exitStoryboard = null;
+
                 ExitCompleted?.Invoke(Item!);
             };
 
-            sb.Begin();
+            _exitStoryboard.Begin();
         };
 
         BeginAnimation(OpacityProperty, fade);
+    }
+
+    /// <summary>
+    /// 清理动画资源，卡片从视觉树移除时调用。
+    /// </summary>
+    public void Cleanup()
+    {
+        // 停止并清理进行中的动画
+        _enterStoryboard?.Stop();
+        _enterStoryboard = null;
+
+        _exitStoryboard?.Stop();
+        _exitStoryboard = null;
+
+        BeginAnimation(OpacityProperty, null);
+        SlideTransform.BeginAnimation(TranslateTransform.YProperty, null);
     }
 
     /// <summary>

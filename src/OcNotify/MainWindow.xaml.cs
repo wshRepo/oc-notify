@@ -78,8 +78,13 @@ public partial class MainWindow : Window
         card.Bind(item, cfg.Style);
         ApplyCardSpacing(card);
 
-        card.ExitCompleted += it =>
+        // 使用具名方法而非 lambda，便于在卡片移除时解除订阅，避免闭包持有 card 导致内存泄漏
+        void OnExitCompleted(NotificationItem it)
         {
+            card.ExitCompleted -= OnExitCompleted;
+            card.DismissRequested -= OnDismissRequested;
+            card.Cleanup();
+
             CardsPanel.Children.Remove(card);
             _exitingCount = Math.Max(0, _exitingCount - 1);
             _manager.RemoveItem(it);
@@ -94,8 +99,12 @@ public partial class MainWindow : Window
                 // 收拢后重新贴锚点（top 固定不动；bottom 需按新高度回贴底边）
                 UpdateAnchorPosition(animate: true);
             }
-        };
-        card.DismissRequested += it => _manager.Dismiss(it);
+        }
+
+        void OnDismissRequested(NotificationItem it) => _manager.Dismiss(it);
+
+        card.ExitCompleted += OnExitCompleted;
+        card.DismissRequested += OnDismissRequested;
 
         // 插入方向决定视觉顺序：
         // - top 锚点：新卡在底部（append）
