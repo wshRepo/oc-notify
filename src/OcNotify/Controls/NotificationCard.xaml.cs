@@ -35,12 +35,11 @@ public partial class NotificationCard : UserControl
     }
 
     /// <summary>
-    /// 绑定数据并应用样式（颜色/透明度/圆角来自配置与分类元数据）。
-    /// 毛玻璃开：卡片背景更透 + 亮边框模拟霜面；关：更实的深色背景。
-    /// 窗口本身始终全透明，不依赖窗口级 backdrop（避免可见灰色矩形）。
+    /// 绑定数据并应用样式：背景/文字/描边/分类色均按主题（light/dark）与配置切换。
+    /// 窗口本身始终全透明，样式只作用于卡片（避免窗口级 backdrop 的可见矩形）。
     /// </summary>
     /// <param name="item">通知项。</param>
-    /// <param name="style">当前样式配置。</param>
+    /// <param name="style">当前样式配置（含 theme/opacity/glassEffect）。</param>
     public void Bind(NotificationItem item, StyleConfig style)
     {
         Item = item;
@@ -48,18 +47,33 @@ public partial class NotificationCard : UserControl
         LabelText.Text = item.Label;
         TitleText.Text = item.SessionTitle;
 
-        var color = CategoryInfo.ParseColor(item.CategoryColor);
+        var dark = style.IsDarkTheme;
+
+        // 分类色按当前主题重取（主题热切换后 item.CategoryColor 可能过期）
+        var meta = CategoryInfo.Get(item.Type, style.AccentColor, dark);
+        item.CategoryColor = meta.ColorHex;
+        var color = CategoryInfo.ParseColor(meta.ColorHex);
         AccentBar.Background = new SolidColorBrush(color);
         LabelText.Foreground = new SolidColorBrush(color);
 
-        // opacity 直接作为背景 alpha：1.0=不透明（默认），调低则透出桌面
-        // glassEffect 只切换视觉风格（底色/描边），不再二次压低透明度
-        var baseHex = style.GlassEffect ? "#1C1C22" : "#141418";
+        // 背景：opacity 直接作为 alpha（1.0=不透明）；glassEffect 只切底色风格
+        string baseHex;
+        string borderHex;
+        if (dark)
+        {
+            baseHex = style.GlassEffect ? "#1C1C22" : "#141418";
+            borderHex = style.GlassEffect ? "#38FFFFFF" : "#22FFFFFF";
+            TitleText.Foreground = new SolidColorBrush(Color.FromRgb(0xF5, 0xF5, 0xF5));
+        }
+        else
+        {
+            baseHex = style.GlassEffect ? "#FFFFFF" : "#F4F4F7";
+            borderHex = style.GlassEffect ? "#22000000" : "#14000000";
+            TitleText.Foreground = new SolidColorBrush(Color.FromRgb(0x18, 0x18, 0x1B));
+        }
+
         var alpha = Math.Clamp(style.Opacity, 0.0, 1.0);
         RootBorder.Background = CategoryInfo.BrushWithAlpha(baseHex, alpha);
-
-        // 描边：玻璃模式用更亮的半透明白，增强“霜面”边界感
-        var borderHex = style.GlassEffect ? "#38FFFFFF" : "#22FFFFFF";
         RootBorder.BorderBrush = CategoryInfo.BrushWithAlpha(borderHex, 1.0);
 
         RootBorder.CornerRadius = new CornerRadius(style.CornerRadius);

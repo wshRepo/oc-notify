@@ -4,7 +4,8 @@
     "glassEffect": true,
     "accentColor": "#7C9CFF",
     "cornerRadius": 14,
-    "position": "top-right"
+    "position": "top-right",
+    "theme": "light"
   },
   "behavior": {
     "durationMs": 5000,

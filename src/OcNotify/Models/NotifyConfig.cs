@@ -65,6 +65,15 @@ public sealed class StyleConfig
     /// <summary>气泡停靠位置：top-left / top-right / bottom-left / bottom-right，默认右上。</summary>
     [JsonPropertyName("position")]
     public string Position { get; set; } = "top-right";
+
+    /// <summary>主题：light / dark，默认浅色。</summary>
+    [JsonPropertyName("theme")]
+    public string Theme { get; set; } = "light";
+
+    /// <summary>是否深色主题（解析 Theme 的便捷判断，非配置字段）。</summary>
+    [JsonIgnore]
+    public bool IsDarkTheme =>
+        string.Equals(Theme, "dark", StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>行为配置。</summary>
