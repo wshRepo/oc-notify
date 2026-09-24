@@ -553,15 +553,7 @@ oc-notify\
 
 ---
 
-## 路线图
-
-- [x] P1 骨架：WPF + 配置 + 命名管道
-- [x] P2 视觉：透明窗、四角定位、双主题、毛玻璃观感
-- [x] P3 动画：堆叠、进出动画、maxVisible 挤出、间距
-- [x] P4 插件：5 类事件、非前台过滤、反误报、自动拉起/空闲自退
-- [x] P5 全链路联调：部署完整性、5 类管道直发、真实 opencode 事件验收通过
-
-### 已知可选增强
+## 已知可选增强
 
 - `dotnet publish /p:PublishSingleFile=true --self-contained` 收敛为单 exe（体积换便利）（用户需自行编译）。
 
