@@ -47,14 +47,15 @@ public partial class NotificationCard : UserControl
     {
         Item = item;
 
-        LabelText.Text = item.Label;
         TitleText.Text = item.SessionTitle;
 
         var dark = style.IsDarkTheme;
 
-        // 分类色按当前主题重取（主题热切换后 item.CategoryColor 可能过期）
-        var meta = CategoryInfo.Get(item.Type, style.AccentColor, dark);
+        // 分类元数据按当前主题+语言重取（主题/语言热切换后 item 中的快照可能过期）
+        var meta = CategoryInfo.Get(item.Type, style.Language, style.AccentColor, dark);
         item.CategoryColor = meta.ColorHex;
+        item.Label = meta.Label;
+        LabelText.Text = item.Label;
         var color = CategoryInfo.ParseColor(meta.ColorHex);
         AccentBar.Background = new SolidColorBrush(color);
         LabelText.Foreground = new SolidColorBrush(color);

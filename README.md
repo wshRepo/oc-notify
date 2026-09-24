@@ -85,6 +85,8 @@
 - **问题询问**：紫色条
 - **会话错误**：红色条
 
+标签随 `style.language` 切换（默认中文；`en` 时显示 Done / Permission / Question / Error / Subagent Done）。
+
 多条同时到达时在配置的角落**堆叠**（默认右上、最多 5 条），最旧的超时后平滑消失、其余移动。
 
 ### 配置调优示例
@@ -249,7 +251,8 @@ Start-Process "$env:USERPROFILE\.config\opencode\assets\OcNotify\OcNotify.exe"
     "accentColor": "#7C9CFF",    // 未知分类时的强调色（色条/标签回退）
     "cornerRadius": 14,          // 卡片圆角（DIP）
     "position": "top-right",     // 停靠角：top-left | top-right | bottom-left | bottom-right
-    "theme": "light"             // 主题：light | dark
+    "theme": "light",            // 主题：light | dark
+    "language": "zh"             // 界面语言：zh（默认）| en
   },
   "behavior": {
     "durationMs": 5000,          // 气泡自动消失时间（毫秒）
@@ -282,6 +285,7 @@ Start-Process "$env:USERPROFILE\.config\opencode\assets\OcNotify\OcNotify.exe"
 | `cornerRadius` | number | `14` | 圆角半径 |
 | `position` | string | `top-right` | `top-left` / `top-right` / `bottom-left` / `bottom-right` |
 | `theme` | string | `light` | `light` / `dark` |
+| `language` | string | `zh` | 界面语言：`zh` / `en`（`en-xx` 前缀亦可） |
 
 #### behavior
 

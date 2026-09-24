@@ -5,7 +5,8 @@
     "accentColor": "#7C9CFF",
     "cornerRadius": 14,
     "position": "top-right",
-    "theme": "light"
+    "theme": "light",
+    "language": "zh"
   },
   "behavior": {
     "durationMs": 5000,

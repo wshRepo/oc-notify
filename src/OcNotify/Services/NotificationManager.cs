@@ -66,7 +66,7 @@ public sealed class NotificationManager
             cfg = _configService.Reload(message.ConfigPath);
         }
 
-        var meta = CategoryInfo.Get(message.Type, cfg.Style.AccentColor, cfg.Style.IsDarkTheme);
+        var meta = CategoryInfo.Get(message.Type, cfg.Style.Language, cfg.Style.AccentColor, cfg.Style.IsDarkTheme);
 
         var item = new NotificationItem
         {

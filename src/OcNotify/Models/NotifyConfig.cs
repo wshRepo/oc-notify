@@ -70,6 +70,13 @@ public sealed class StyleConfig
     [JsonPropertyName("theme")]
     public string Theme { get; set; } = "light";
 
+    /// <summary>
+    /// 界面语言：zh（默认）/ en；en-xx 前缀亦识别为英文。
+    /// 影响分类标签等展示文案，保存即热生效。
+    /// </summary>
+    [JsonPropertyName("language")]
+    public string Language { get; set; } = "zh";
+
     /// <summary>是否深色主题（解析 Theme 的便捷判断，非配置字段）。</summary>
     [JsonIgnore]
     public bool IsDarkTheme =>
