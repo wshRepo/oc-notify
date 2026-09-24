@@ -33,6 +33,8 @@ interface EventsCfg {
 
 interface BehaviorCfg {
   onlyWhenInactive: boolean;
+  /** 调试日志开关：开启后 debugLog 写入 %TEMP%\oc-notify-plugin.log */
+  debug: boolean;
 }
 
 interface PluginCfg {
@@ -50,7 +52,7 @@ const DEFAULT_EVENTS: EventsCfg = {
   subagentDone: true,
 };
 
-const DEFAULT_BEHAVIOR: BehaviorCfg = { onlyWhenInactive: true };
+const DEFAULT_BEHAVIOR: BehaviorCfg = { onlyWhenInactive: true, debug: false };
 
 function readJson(path: string): Record<string, unknown> | null {
   try {
@@ -87,6 +89,9 @@ function loadConfig(directory: string): PluginCfg {
     projectCfg?.["behavior"],
   );
 
+  // 同步 debug 开关（loadConfig 每次调用都会刷新）
+  setDebugEnabled(behavior.debug === true);
+
   return {
     events,
     behavior,
@@ -95,15 +100,30 @@ function loadConfig(directory: string): PluginCfg {
 }
 
 // ---------------------------------------------------------------------------
-// 调试日志（P5 联调用；稳定后可移除 debugLog 调用，保留函数为空实现即可）
+// 调试日志（behavior.debug 开启后写入；默认关闭，避免无谓磁盘 IO）
 // ---------------------------------------------------------------------------
 
 const DEBUG_LOG = join(tmpdir(), "oc-notify-plugin.log");
 
-/** 追加一行调试日志；失败静默。 */
-function debugLog(msg: string): void {
+/**
+ * 模块级 debug 开关：loadConfig 后同步刷新。
+ * debugLog 是同步函数、可能在 loadConfig 前被调用，故用独立变量而非每次读 cfg。
+ */
+let debugEnabled = false;
+
+/** 同步 debug 开关（配置加载/刷新时调用）。 */
+function setDebugEnabled(on: boolean): void {
+  debugEnabled = on;
+}
+
+/**
+ * 追加一行调试日志；仅 debug=true 时写入，失败静默。
+ * 格式：[ISO时间] [级别] 消息
+ */
+function debugLog(msg: string, level: "INFO" | "WARN" | "ERROR" = "INFO"): void {
+  if (!debugEnabled) return;
   try {
-    appendFileSync(DEBUG_LOG, `[${new Date().toISOString()}] ${msg}\n`);
+    appendFileSync(DEBUG_LOG, `[${new Date().toISOString()}] [${level}] ${msg}\n`);
   } catch {
     /* ignore */
   }
@@ -177,7 +197,7 @@ async function getForegroundPidAsync(): Promise<number> {
     const pid = Number.parseInt(out.trim(), 10);
     return Number.isFinite(pid) && pid > 0 ? pid : 0;
   } catch (e) {
-    debugLog(`getForegroundPidAsync failed: ${String(e)}`);
+    debugLog(`getForegroundPidAsync failed: ${String(e)}`, "ERROR");
     return 0;
   }
 }
@@ -217,14 +237,14 @@ const PIPE_PATH = "\\\\.\\pipe\\oc-notify";
  * 同步短操作 + try-catch，失败静默，绝不拖垮事件处理。
  */
 function sendPipe(jsonLine: string): void {
-  debugLog(`sendPipe: ${jsonLine}`);
+  debugLog(`sendPipe → ${jsonLine}`);
   let fd: number | null = null;
   try {
     fd = openSync(PIPE_PATH, "w");
     writeSync(fd, jsonLine + "\n");
-    debugLog("sendPipe: written");
+    debugLog("sendPipe ✓ written");
   } catch (e) {
-    debugLog(`sendPipe error: ${String(e)}`);
+    debugLog(`sendPipe ✗ ${String(e)}`, "ERROR");
   } finally {
     if (fd !== null) {
       try {
@@ -271,11 +291,11 @@ export const NotifyBubblePlugin: Plugin = async (input: PluginInput): Promise<Ho
   // 初始化：配置 + 祖先 PID（均为一次性，且在插件加载阶段，不占事件路径）
   let cfg = loadConfig(directory);
   debugLog(
-    `config loaded: onlyWhenInactive=${cfg.behavior.onlyWhenInactive} ` +
-      `events=${JSON.stringify(cfg.events)}`,
+    `config loaded: onlyWhenInactive=${cfg.behavior.onlyWhenInactive} debug=${cfg.behavior.debug} ` +
+      `events=${JSON.stringify(cfg.events)} projectCfg=${cfg.projectConfigPath ?? "(none)"}`,
   );
   ancestorPids = await collectAncestorPids();
-  debugLog(`ancestors=[${[...ancestorPids].join(",")}]`);
+  debugLog(`ancestors=[${[...ancestorPids].join(",")}] count=${ancestorPids.size}`);
 
   // --- 反误报状态 ---
   /** sessionID → 最近一次 busy 时间（短任务过滤用） */
@@ -305,11 +325,11 @@ export const NotifyBubblePlugin: Plugin = async (input: PluginInput): Promise<Ho
     if (disposed) return;
     refreshConfig();
     if (!cfg.events[type]) {
-      debugLog(`emit skip: event ${type} disabled`);
+      debugLog(`emit skip [${type}]: event disabled in config`);
       return;
     }
     if (!(await shouldNotify(cfg))) {
-      debugLog(`emit skip: shouldNotify=false type=${type}`);
+      debugLog(`emit skip [${type}]: opencode is foreground (onlyWhenInactive)`);
       return;
     }
 
@@ -320,7 +340,7 @@ export const NotifyBubblePlugin: Plugin = async (input: PluginInput): Promise<Ho
       timestamp: Date.now(),
       configPath: cfg.projectConfigPath,
     };
-    debugLog(`emit ok: type=${type} title=${sessionTitle}`);
+    debugLog(`emit [${type}] title="${sessionTitle}" sid=${sessionID}`);
     sendPipe(JSON.stringify(payload));
   }
 
@@ -355,7 +375,7 @@ export const NotifyBubblePlugin: Plugin = async (input: PluginInput): Promise<Ho
     try {
       const errTs = errorAt.get(sessionID);
       if (errTs !== undefined && Date.now() - errTs < 2000) {
-        debugLog(`onIdle skip: recent error sid=${sessionID}`);
+        debugLog(`onIdle skip: recent session.error (suppress duplicate) sid=${sessionID}`);
         errorAt.delete(sessionID);
         return;
       }
@@ -363,16 +383,21 @@ export const NotifyBubblePlugin: Plugin = async (input: PluginInput): Promise<Ho
       const busyTs = busyAt.get(sessionID);
       busyAt.delete(sessionID);
       if (busyTs !== undefined && Date.now() - busyTs < 2000) {
-        debugLog(`onIdle skip: short task elapsed=${Date.now() - busyTs}ms sid=${sessionID}`);
+        debugLog(
+          `onIdle skip: short task elapsed=${Date.now() - busyTs}ms (<2000ms) sid=${sessionID}`,
+        );
         return; // 刚 busy 就 idle，视为无实质工作的短任务
       }
 
       const brief = await getSessionBrief(sessionID);
       const kind = brief.parentID ? "subagentDone" : "sessionIdle";
-      debugLog(`onIdle → ${kind} sid=${sessionID} title=${brief.title}`);
+      debugLog(
+        `onIdle → [${kind}] title="${brief.title}" sid=${sessionID}` +
+          (busyTs ? ` busyFor=${Date.now() - busyTs}ms` : " busyTs=none"),
+      );
       await emit(kind, sessionID, brief.title);
     } catch (e) {
-      debugLog(`onIdle error: ${String(e)}`);
+      debugLog(`onIdle error: ${String(e)}`, "ERROR");
     }
   }
 
@@ -382,12 +407,14 @@ export const NotifyBubblePlugin: Plugin = async (input: PluginInput): Promise<Ho
       if (sessionID) {
         errorAt.set(sessionID, Date.now());
         const brief = await getSessionBrief(sessionID);
+        debugLog(`onError → [sessionError] title="${brief.title}" sid=${sessionID}`);
         await emit("sessionError", sessionID, brief.title);
       } else {
+        debugLog("onError → [sessionError] no sessionID");
         await emit("sessionError", "", "OpenCode");
       }
-    } catch {
-      /* ignore */
+    } catch (e) {
+      debugLog(`onError error: ${String(e)}`, "ERROR");
     }
   }
 
@@ -398,7 +425,12 @@ export const NotifyBubblePlugin: Plugin = async (input: PluginInput): Promise<Ho
   function schedulePermission(sessionID: string): void {
     if (disposed) return;
     const prev = permTimers.get(sessionID);
-    if (prev) clearTimeout(prev);
+    if (prev) {
+      clearTimeout(prev);
+      debugLog(`permission debounce restart sid=${sessionID}`);
+    } else {
+      debugLog(`permission debounce start (300ms) sid=${sessionID}`);
+    }
 
     const timer = setTimeout(() => {
       permTimers.delete(sessionID);
@@ -406,9 +438,10 @@ export const NotifyBubblePlugin: Plugin = async (input: PluginInput): Promise<Ho
       void (async () => {
         try {
           const brief = await getSessionBrief(sessionID);
+          debugLog(`permission debounce fire → title="${brief.title}" sid=${sessionID}`);
           await emit("permissionAsk", sessionID, brief.title);
-        } catch {
-          /* ignore */
+        } catch (e) {
+          debugLog(`permission emit error: ${String(e)}`, "ERROR");
         }
       })();
     }, 300);
@@ -419,9 +452,10 @@ export const NotifyBubblePlugin: Plugin = async (input: PluginInput): Promise<Ho
   async function onQuestion(sessionID: string): Promise<void> {
     try {
       const brief = await getSessionBrief(sessionID);
+      debugLog(`onQuestion → title="${brief.title}" sid=${sessionID}`);
       await emit("questionAsk", sessionID, brief.title);
-    } catch {
-      /* ignore */
+    } catch (e) {
+      debugLog(`onQuestion error: ${String(e)}`, "ERROR");
     }
   }
 
@@ -441,7 +475,13 @@ export const NotifyBubblePlugin: Plugin = async (input: PluginInput): Promise<Ho
       type === "permission.asked" ||
       type === "question.asked"
     ) {
-      debugLog(`event: ${type}`);
+      const sid =
+        (event as { properties?: { sessionID?: string } }).properties?.sessionID ?? "";
+      const st =
+        type === "session.status"
+          ? ` status=${(event as { properties?: { status?: { type?: string } } }).properties?.status?.type ?? "?"}`
+          : "";
+      debugLog(`event: ${type}${st} sid=${sid}`);
     }
 
     const props = ((event as { properties?: Record<string, unknown> }).properties ?? {}) as {
@@ -525,12 +565,13 @@ export const NotifyBubblePlugin: Plugin = async (input: PluginInput): Promise<Ho
     event: ({ event }: { event: Event }) => {
       try {
         dispatch(event);
-      } catch {
-        /* 插件内部错误绝不外溢 */
+      } catch (e) {
+        debugLog(`event handler error: ${String(e)}`, "ERROR");
       }
     },
 
     dispose: async () => {
+      debugLog("plugin dispose");
       disposed = true;
       clearInterval(gcTimer);
       for (const t of permTimers.values()) clearTimeout(t);

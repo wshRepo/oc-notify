@@ -11,7 +11,8 @@
     "durationMs": 5000,
     "maxVisible": 5,
     "clickToDismiss": true,
-    "onlyWhenInactive": true
+    "onlyWhenInactive": true,
+    "debug": false
   },
   "events": {
     "sessionIdle": true,

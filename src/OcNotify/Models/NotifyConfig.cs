@@ -98,6 +98,14 @@ public sealed class BehaviorConfig
     /// </summary>
     [JsonPropertyName("onlyWhenInactive")]
     public bool OnlyWhenInactive { get; set; } = true;
+
+    /// <summary>
+    /// 调试日志开关（默认关）。
+    /// 开启后插件写 %TEMP%\oc-notify-plugin.log，
+    /// exe 侧可在关键路径调用同一开关输出诊断信息。
+    /// </summary>
+    [JsonPropertyName("debug")]
+    public bool Debug { get; set; }
 }
 
 /// <summary>各提醒事件启用开关。</summary>
