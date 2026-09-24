@@ -1,22 +1,26 @@
 # oc-notify
 
-为 **opencode CLI** 定制的桌面气泡通知工具：对话完成、权限请求、AI 提问、会话错误、子代理完成时，在屏幕角落弹出现代化气泡提醒，支持多气泡堆叠、四角停靠、浅色/深色主题、毛玻璃观感与丰富的 JSON 配置。
+为 **opencode CLI** 定制的桌面气泡通知工具：对话完成、权限请求、AI 提问、会话错误、子代理完成时，在屏幕角落弹出现代化气泡提醒。
 
-> **不使用 Windows 自带通知（Toast）**，完全自绘 WPF 透明窗口，样式自由、动画流畅。
+> **✨ WinUI 3 风格设计** — 采用微软 Fluent Design 设计语言，圆角卡片、流畅动画、毛玻璃观感，美观精致。
+> **🚫 不使用 Windows 自带通知（Toast）** — 完全自绘 WPF 透明窗口，样式自由、动画流畅、不受系统限制。
+
+![气泡效果预览](docs/Example.png)
 
 ---
 
 ## 目录
 
 - [功能特性](#功能特性)
-- [部署](#部署)
 - [使用](#使用)
+- [部署](#部署)
 - [配置参考](#配置参考)
 - [故障排查](#故障排查)
 - [架构与原理](#架构与原理)
 - [开发指南](#开发指南)
 - [项目结构](#项目结构)
 - [路线图](#路线图)
+- [许可](#许可)
 
 ---
 
@@ -32,16 +36,17 @@
 | `sessionError` | 会话出错（session.error） | 红 `#F87171` |
 | `subagentDone` | 子代理/子任务完成（idle 且存在 parentID） | 蓝 `#38BDF8` |
 
-### 气泡 UI
+### 气泡 UI（WinUI 3 风格）
 
-- **现代化卡片**：分类色条 + 标签 + 会话标题 + 圆角 + 阴影
+- **Fluent Design 设计**：采用 WinUI 3 / Fluent Design 设计语言，现代化视觉体验
+- **精美卡片**：分类色条 + 标签 + 会话标题 + 圆角 + 阴影，层次分明
 - **四角停靠**：`top-left` / `top-right`（默认）/ `bottom-left` / `bottom-right`
 - **堆叠规则**：
   - 上方两角：最高点固定，新气泡向下叠加，旧气泡消失后其余**上移**
   - 下方两角：最低点固定，新气泡向上叠加，旧气泡消失后其余**下移**
-- **动画**：进入滑入淡入 → 超时/点击渐隐收拢，动作连贯
-- **主题**：`light`（默认）/ `dark`，分类色自动切换保证对比度
-- **毛玻璃观感**：卡片半透明 + 亮描边（窗口本体始终全透明，无灰色底板）
+- **流畅动画**：进入滑入淡入 → 超时/点击渐隐收拢，动作连贯自然
+- **双主题**：`light`（默认）/ `dark`，分类色自动切换保证对比度
+- **毛玻璃观感**：卡片半透明 + 亮描边，营造层次感（窗口本体始终全透明）
 - **多气泡**：同时最多 `maxVisible` 条，超出挤出最旧；卡片间距方向远离锚点边
 - **点击关闭**：可配置
 
@@ -61,6 +66,86 @@
 - **.NET**：.NET 8 **Desktop Runtime**（x64）
 - **opencode**：v1.18+（使用 v1 插件接口 `@opencode-ai/plugin`）
 - 插件运行在 opencode 内置 Bun 中，无需单独安装 Node/Bun
+
+---
+
+## 使用
+
+### 日常流程
+
+安装并重启 opencode 后，**无需任何额外操作**：
+
+1. 在 opencode 中正常对话
+2. AI 回复完成、需要权限、向你提问等时机自动弹出气泡
+3. 气泡默认 **5 秒**自动消失，也可**点击立即关闭**
+4. 关闭所有 opencode 后约 **60 秒**，`OcNotify.exe` 自动退出；下次打开 opencode 时自动再拉起
+
+### 何时会弹、何时不弹
+
+| 场景 | 是否弹 |
+|------|--------|
+| 你切到了其他窗口 / 最小化了 opencode，回复完成 | ✅ 弹 |
+| 你正停在 opencode 前台（`onlyWhenInactive=true`，默认） | ❌ 不弹 |
+| 权限请求弹出后 300ms 内被自动批准 | ❌ 不弹（消抖） |
+| 会话刚出错，紧接着 idle | ❌ 不弹（避免双弹） |
+| busy→idle 不足 2 秒的短任务 | ❌ 不弹（降噪） |
+| 对应 `events.xxx` 被关掉 | ❌ 不弹 |
+
+想"前台也弹"：把配置里 `behavior.onlyWhenInactive` 改为 `false`，保存即生效。
+
+### 五类气泡长什么样
+
+- **对话完成 / 子代理完成**：绿色/蓝色条 + 标题为会话名
+- **权限请求**：琥珀色条
+- **问题询问**：紫色条
+- **会话错误**：红色条
+
+多条同时到达时在配置的角落**堆叠**（默认右上、最多 5 条），最旧的超时后平滑消失、其余移动。
+
+### 配置调优示例
+
+```jsonc
+// ~\.config\opencode\oc-notify.json —— 保存即生效
+{
+  "style": {
+    "position": "bottom-right",  // 换到右下角
+    "theme": "dark",             // 深色主题
+    "opacity": 0.90              // 略微透明
+  },
+  "behavior": {
+    "durationMs": 8000,          // 停留 8 秒
+    "onlyWhenInactive": true
+  }
+}
+```
+
+**项目级配置**：在某个项目根目录放 `oc-notify.json`，可只写想覆盖的段（`style` / `behavior` / `events`），运行时与全局合并，仅对该项目生效。
+
+完整字段见 [配置参考](#配置参考)。
+
+### 不依赖 opencode 的手动测试
+
+```powershell
+# 单条（可指定分类）
+.\scripts\Send-TestNotification.ps1 -Type permissionAsk -Title "手动测试"
+
+# 连发 7 条：观察堆叠、挤出、进出场动画
+.\scripts\Send-StackTest.ps1 -Count 7
+
+# type 可选: sessionIdle | permissionAsk | questionAsk | sessionError | subagentDone
+```
+
+### 推荐验收清单
+
+- [x] 单条：从锚点方向滑入 → 5s 渐隐收拢消失
+- [x] 连发 7 条：稳定在 maxVisible，最旧被挤出
+- [x] 消失动画：先渐隐占位，再收拢，其余平滑移动
+- [x] 点击气泡立即消失
+- [x] 全部消失后窗口隐藏（任务栏无图标、不抢焦点）
+- [x] opencode 前台时不弹；切走后弹
+- [x] 改 `theme`/`position`/`durationMs` → 下一条通知即生效
+- [X] 开两个 opencode，关掉一个 → exe 不退；全关 → 约 60s 后 exe 退出
+- [x] 重复启动 exe → 只存活一个进程
 
 ---
 
@@ -84,13 +169,13 @@ deploy\
 1. **确认 .NET 8 Desktop Runtime（x64）已安装**
    - 脚本会自动检测；未安装时会提示并给出下载地址后退出
    - 下载页：<https://dotnet.microsoft.com/download/dotnet/8.0>
-   - 选择 **“.NET Desktop Runtime 8.0.x (x64)”**（注意不是 ASP.NET Runtime，也不是仅 Runtime）
+   - 选择 **".NET Desktop Runtime 8.0.x (x64)"**（注意不是 ASP.NET Runtime，也不是仅 Runtime）
 2. **双击 `deploy\install.bat`**
 3. 脚本自动完成：
    - 检测运行时 → 停止正在运行的 `OcNotify.exe`（避免文件占用）→ 创建目标目录 → 复制插件 / 程序 / 配置
    - 结束后打印**部署报告**（每项 `[成功]` / `[跳过]` / `[失败]` 及目标路径），**窗口保持打开**，按任意键关闭
 4. **重启 opencode CLI**（插件只在启动时加载）
-5. 按下方[使用](#使用)验证
+5. 按上方[使用](#使用)验证
 
 **目标位置**（脚本自动创建）：
 
@@ -162,86 +247,6 @@ Start-Process "$env:USERPROFILE\.config\opencode\assets\OcNotify\OcNotify.exe"
 
 ---
 
-## 使用
-
-### 日常流程
-
-安装并重启 opencode 后，**无需任何额外操作**：
-
-1. 在 opencode 中正常对话
-2. AI 回复完成、需要权限、向你提问等时机自动弹出气泡
-3. 气泡默认 **5 秒**自动消失，也可**点击立即关闭**
-4. 关闭所有 opencode 后约 **60 秒**，`OcNotify.exe` 自动退出；下次打开 opencode 时自动再拉起
-
-### 何时会弹、何时不弹
-
-| 场景 | 是否弹 |
-|------|--------|
-| 你切到了其他窗口 / 最小化了 opencode，回复完成 | ✅ 弹 |
-| 你正停在 opencode 前台（`onlyWhenInactive=true`，默认） | ❌ 不弹 |
-| 权限请求弹出后 300ms 内被自动批准 | ❌ 不弹（消抖） |
-| 会话刚出错，紧接着 idle | ❌ 不弹（避免双弹） |
-| busy→idle 不足 2 秒的短任务 | ❌ 不弹（降噪） |
-| 对应 `events.xxx` 被关掉 | ❌ 不弹 |
-
-想“前台也弹”：把配置里 `behavior.onlyWhenInactive` 改为 `false`，保存即生效。
-
-### 五类气泡长什么样
-
-- **对话完成 / 子代理完成**：绿色/蓝色条 + 标题为会话名
-- **权限请求**：琥珀色条
-- **问题询问**：紫色条
-- **会话错误**：红色条
-
-多条同时到达时在配置的角落**堆叠**（默认右上、最多 5 条），最旧的超时后平滑消失、其余移动。
-
-### 配置调优示例
-
-```jsonc
-// ~\.config\opencode\oc-notify.json —— 保存即生效
-{
-  "style": {
-    "position": "bottom-right",  // 换到右下角
-    "theme": "dark",             // 深色主题
-    "opacity": 0.95              // 略微透明
-  },
-  "behavior": {
-    "durationMs": 8000,          // 停留 8 秒
-    "onlyWhenInactive": true
-  }
-}
-```
-
-**项目级配置**：在某个项目根目录放 `oc-notify.json`，可只写想覆盖的段（`style` / `behavior` / `events`），运行时与全局合并，仅对该项目生效。
-
-完整字段见 [配置参考](#配置参考)。
-
-### 不依赖 opencode 的手动测试
-
-```powershell
-# 单条（可指定分类）
-.\scripts\Send-TestNotification.ps1 -Type permissionAsk -Title "手动测试"
-
-# 连发 7 条：观察堆叠、挤出、进出场动画
-.\scripts\Send-StackTest.ps1 -Count 7
-
-# type 可选: sessionIdle | permissionAsk | questionAsk | sessionError | subagentDone
-```
-
-### 推荐验收清单
-
-- [x] 单条：从锚点方向滑入 → 5s 渐隐收拢消失
-- [x] 连发 7 条：稳定在 maxVisible，最旧被挤出
-- [x] 消失动画：先渐隐占位，再收拢，其余平滑移动
-- [x] 点击气泡立即消失
-- [x] 全部消失后窗口隐藏（任务栏无图标、不抢焦点）
-- [x] opencode 前台时不弹；切走后弹
-- [x] 改 `theme`/`position`/`durationMs` → 下一条通知即生效
-- [X] 开两个 opencode，关掉一个 → exe 不退；全关 → 约 60s 后 exe 退出
-- [x] 重复启动 exe → 只存活一个进程
-
----
-
 ## 配置参考
 
 **全局配置**：`%USERPROFILE%\.config\opencode\oc-notify.json`  
@@ -254,7 +259,7 @@ Start-Process "$env:USERPROFILE\.config\opencode\assets\OcNotify\OcNotify.exe"
 ```jsonc
 {
   "style": {
-    "opacity": 1.0,              // 卡片背景不透明度 0.0~1.0，1.0=完全不透明
+    "opacity": 0.90,             // 卡片背景不透明度 0.0~1.0，1.0=完全不透明
     "glassEffect": true,         // 毛玻璃观感：true=半透明底+亮描边；false=纯色深底
     "accentColor": "#7C9CFF",    // 未知分类时的强调色（色条/标签回退）
     "cornerRadius": 14,          // 卡片圆角（DIP）
@@ -286,7 +291,7 @@ Start-Process "$env:USERPROFILE\.config\opencode\assets\OcNotify\OcNotify.exe"
 
 | 字段 | 类型 | 默认 | 说明 |
 |------|------|------|------|
-| `opacity` | number | `1.0` | 卡片背景 alpha，直接生效 |
+| `opacity` | number | `0.90` | 卡片背景 alpha，直接生效 |
 | `glassEffect` | bool | `true` | 毛玻璃观感（卡片级样式，非窗口 backdrop） |
 | `accentColor` | string | `#7C9CFF` | 强调色回退 |
 | `cornerRadius` | number | `14` | 圆角半径 |
@@ -541,6 +546,8 @@ oc-notify\
 │       └── OcNotify\                 # exe + dll + 依赖
 ├── config\
 │   └── oc-notify.default.json        # 默认配置模板（源）
+├── docs\
+│   └── Example.png                   # README 截图（五类气泡效果）
 ├── scripts\
 │   ├── Send-TestNotification.ps1     # 单条管道测试
 │   └── Send-StackTest.ps1            # 连发测试（堆叠/挤出）
@@ -577,4 +584,28 @@ oc-notify\
 
 ## 许可
 
-本仓库未声明许可证；如需开源分发请自行补充 LICENSE。
+本项目采用 [MIT License](LICENSE) 开源许可。
+
+```
+MIT License
+
+Copyright (c) 2026 oc-notify contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
