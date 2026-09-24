@@ -19,10 +19,11 @@ set "USER_JSON=%CFG%\oc-notify.json"
 set /a OK=0
 set /a FAIL=0
 set /a SKIP=0
-set "REPORT="
+
+set "VERSION=v1.0.0"
 
 echo ============================================================
-echo    oc-notify 一键部署
+echo    oc-notify 一键部署  %VERSION%
 echo ============================================================
 echo.
 
@@ -44,12 +45,25 @@ if not exist "%SRC%\OcNotify\OcNotify.exe" (
 
 rem ---------- 1. 检测 .NET 8 Desktop 运行时 ----------
 set "HAS_RUNTIME=0"
-set "DOTNET_DIRS=%ProgramFiles%\dotnet;%ProgramFiles(x86)%\dotnet;%USERPROFILE%\.dotnet"
-if defined DOTNET_ROOT set "DOTNET_DIRS=%DOTNET_ROOT%;%DOTNET_DIRS%"
 
-for %%D in (%DOTNET_DIRS%) do (
-    if exist "%%D\shared\Microsoft.WindowsDesktop.App" (
-        for /d %%V in ("%%D\shared\Microsoft.WindowsDesktop.App\8.*") do (
+if exist "%ProgramFiles%\dotnet\shared\Microsoft.WindowsDesktop.App" (
+    for /d %%V in ("%ProgramFiles%\dotnet\shared\Microsoft.WindowsDesktop.App\8.*") do (
+        if exist "%%~fV" set "HAS_RUNTIME=1"
+    )
+)
+if exist "%ProgramFiles(x86)%\dotnet\shared\Microsoft.WindowsDesktop.App" (
+    for /d %%V in ("%ProgramFiles(x86)%\dotnet\shared\Microsoft.WindowsDesktop.App\8.*") do (
+        if exist "%%~fV" set "HAS_RUNTIME=1"
+    )
+)
+if exist "%USERPROFILE%\.dotnet\shared\Microsoft.WindowsDesktop.App" (
+    for /d %%V in ("%USERPROFILE%\.dotnet\shared\Microsoft.WindowsDesktop.App\8.*") do (
+        if exist "%%~fV" set "HAS_RUNTIME=1"
+    )
+)
+if defined DOTNET_ROOT (
+    if exist "%DOTNET_ROOT%\shared\Microsoft.WindowsDesktop.App" (
+        for /d %%V in ("%DOTNET_ROOT%\shared\Microsoft.WindowsDesktop.App\8.*") do (
             if exist "%%~fV" set "HAS_RUNTIME=1"
         )
     )
@@ -84,29 +98,22 @@ rem ---------- 3. 创建目标目录 ----------
 if not exist "%PLUGINS%" mkdir "%PLUGINS%"
 if not exist "%ASSETS%" mkdir "%ASSETS%"
 
-rem ---------- 4. 复制插件 ----------
+rem ---------- 4-5. 复制插件和 exe ----------
+echo 复制文件:
 call :COPY_ONE "%SRC%\notify-bubble.ts" "%PLUGINS%\notify-bubble.ts"
-
-rem ---------- 5. 复制 exe 及依赖 ----------
 for %%F in ("%SRC%\OcNotify\*.*") do (
     call :COPY_ONE "%%~fF" "%ASSETS%\%%~nxF"
 )
 
 rem ---------- 6. 配置文件（已存在则保留用户配置） ----------
 if exist "%USER_JSON%" (
-    set "REPORT=!REPORT!  [跳过] oc-notify.json 已存在，保留你的现有配置^
-"
+    echo   [跳过] oc-notify.json 已存在，保留你的现有配置
     set /a SKIP+=1
 ) else (
     call :COPY_ONE "%DEFAULT_JSON%" "%USER_JSON%"
 )
 
 rem ---------- 7. 部署报告 ----------
-echo ============================================================
-echo    部署报告
-echo ============================================================
-echo.
-echo %REPORT%
 echo ------------------------------------------------------------
 echo   成功: !OK!    跳过: !SKIP!    失败: !FAIL!
 echo ============================================================
@@ -138,12 +145,10 @@ set "SRCF=%~1"
 set "DSTF=%~2"
 copy /Y "%SRCF%" "%DSTF%" >nul 2>&1
 if errorlevel 1 (
-    set "REPORT=!REPORT!  [失败] %~nx1  -^>  %DSTF%^
-"
+    echo   [失败] %~nx1 -^> %DSTF%
     set /a FAIL+=1
 ) else (
-    set "REPORT=!REPORT!  [成功] %~nx1  -^>  %DSTF%^
-"
+    echo   [成功] %~nx1 -^> %DSTF%
     set /a OK+=1
 )
 goto :eof
