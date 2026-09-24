@@ -10,7 +10,8 @@
   "behavior": {
     "durationMs": 5000,
     "maxVisible": 5,
-    "clickToDismiss": true
+    "clickToDismiss": true,
+    "onlyWhenInactive": true
   },
   "events": {
     "sessionIdle": true,

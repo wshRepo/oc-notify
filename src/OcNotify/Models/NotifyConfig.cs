@@ -90,6 +90,14 @@ public sealed class BehaviorConfig
     /// <summary>是否允许点击气泡立即消失。</summary>
     [JsonPropertyName("clickToDismiss")]
     public bool ClickToDismiss { get; set; } = true;
+
+    /// <summary>
+    /// 仅在 opencode 非前台时弹窗（默认开）。
+    /// 检测在插件侧完成（祖先进程链 + GetForegroundWindow），
+    /// exe 收到消息即视为需要展示；此字段供配置读取与文档一致性。
+    /// </summary>
+    [JsonPropertyName("onlyWhenInactive")]
+    public bool OnlyWhenInactive { get; set; } = true;
 }
 
 /// <summary>各提醒事件启用开关。</summary>
