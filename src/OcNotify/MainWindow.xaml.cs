@@ -225,31 +225,26 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// SizeChanged：bottom 锚点在高度动画期间保持底边固定（Top = 固定底边 - 高度）。
+    /// SizeChanged：窗口尺寸变化（含 SizeToContent 与卡片收拢）时重新贴锚点。
+    /// top 锚点：Top 不随高度变，但 Left 需保持；bottom 锚点：底边固定，Top 需跟随高度。
+    /// 直接在此同步校正，避免依赖单独调用时机。
     /// </summary>
     /// <param name="sender">事件源。</param>
     /// <param name="e">事件参数。</param>
     private void OnWindowSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        if (!_positioned || !IsBottomAnchor || CardsPanel.Children.Count == 0)
+        if (!_positioned || CardsPanel.Children.Count == 0)
         {
             return;
         }
 
-        // 仅在可见时校正，避免隐藏状态下抖动
         if (Visibility != Visibility.Visible)
         {
             return;
         }
 
-        var (dpiX, dpiY) = GetDpiScale();
-        var h = ActualHeight;
-        // _fixedEdgeDip 是屏幕底边（工作区底 - margin）的 DIP 值
-        var top = _fixedEdgeDip - h;
-        BeginAnimation(TopProperty, null);
-        Top = top;
-        _ = dpiX;
-        _ = dpiY;
+        // 尺寸变化后立即按当前尺寸重算（不做动画，避免抖动）
+        UpdateAnchorPosition(animate: false);
     }
 
     /// <summary>
@@ -273,6 +268,8 @@ public partial class MainWindow : Window
                 return;
             }
 
+            // SystemParameters.WorkArea 在 WPF 中返回 DIP（设备无关单位），
+            // Left/Top/Width/Height 也是 DIP，直接运算，不做像素中转（混用单位是定位偏移的根因）
             var workArea = SystemParameters.WorkArea;
             var style = _configService.Current.Style;
             const double margin = 16.0;
@@ -280,33 +277,26 @@ public partial class MainWindow : Window
             var w = ActualWidth > 0 ? ActualWidth : Width;
             var h = ActualHeight > 0 ? ActualHeight : MinHeight;
 
-            var (dpiX, dpiY) = GetDpiScale();
-            var wPx = w * dpiX;
-            var hPx = h * dpiY;
-            var marginPx = margin * dpiY;
-
             var pos = (style.Position ?? "top-right").ToLowerInvariant();
             var isRight = pos.Contains("right", StringComparison.Ordinal);
             var isBottom = pos.Contains("bottom", StringComparison.Ordinal);
 
-            // 水平：左/右贴边
-            double leftPx = isRight
-                ? workArea.Right - wPx - marginPx
-                : workArea.Left + marginPx;
-            var left = leftPx / dpiX;
+            // 水平：左/右边距（全 DIP）
+            var left = isRight
+                ? workArea.Right - w - margin
+                : workArea.Left + margin;
 
             double top;
             if (isBottom)
             {
                 // 底边固定：记录固定底边（DIP），Top = 底边 - 高度
-                var bottomEdgePx = workArea.Bottom - marginPx;
-                _fixedEdgeDip = bottomEdgePx / dpiY;
+                _fixedEdgeDip = workArea.Bottom - margin;
                 top = _fixedEdgeDip - h;
             }
             else
             {
                 // 顶边固定：Top 恒定，高度向下扩展
-                top = (workArea.Top + marginPx) / dpiY;
+                top = workArea.Top + margin;
                 _fixedEdgeDip = 0;
             }
 
@@ -343,24 +333,6 @@ public partial class MainWindow : Window
 
             _positioned = true;
         }), DispatcherPriority.Loaded);
-    }
-
-    /// <summary>
-    /// 获取当前窗口 DPI 缩放（X/Y）。
-    /// </summary>
-    /// <returns>(scaleX, scaleY)：1.0 = 96 DPI。</returns>
-    private (double scaleX, double scaleY) GetDpiScale()
-    {
-        var source = PresentationSource.FromVisual(this);
-        if (source?.CompositionTarget is null)
-        {
-            return (1.0, 1.0);
-        }
-
-        var m = source.CompositionTarget.TransformFromDevice;
-        var sx = Math.Abs(m.M11) > 0.01 ? 1.0 / m.M11 : 1.0;
-        var sy = Math.Abs(m.M22) > 0.01 ? 1.0 / m.M22 : 1.0;
-        return (sx, sy);
     }
 
     /// <inheritdoc />

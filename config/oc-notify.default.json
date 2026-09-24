@@ -1,6 +1,6 @@
 {
   "style": {
-    "opacity": 0.95,
+    "opacity": 1.0,
     "glassEffect": true,
     "accentColor": "#7C9CFF",
     "cornerRadius": 14,

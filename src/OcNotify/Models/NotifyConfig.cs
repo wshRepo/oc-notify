@@ -46,11 +46,11 @@ public sealed class NotifyConfig
 /// <summary>样式配置。</summary>
 public sealed class StyleConfig
 {
-    /// <summary>整体透明度 0.0~1.0，叠加到卡片背景 alpha。</summary>
+    /// <summary>整体透明度 0.0~1.0，直接作为卡片背景 alpha；1.0=完全不透明（默认）。</summary>
     [JsonPropertyName("opacity")]
-    public double Opacity { get; set; } = 0.95;
+    public double Opacity { get; set; } = 1.0;
 
-    /// <summary>毛玻璃开关。切换时需重建窗口（分层窗口与 DWM backdrop 互斥）。</summary>
+    /// <summary>毛玻璃开关（默认开）：亮边框+霜面风格；关=纯色深底。</summary>
     [JsonPropertyName("glassEffect")]
     public bool GlassEffect { get; set; } = true;
 

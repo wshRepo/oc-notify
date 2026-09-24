@@ -52,11 +52,10 @@ public partial class NotificationCard : UserControl
         AccentBar.Background = new SolidColorBrush(color);
         LabelText.Foreground = new SolidColorBrush(color);
 
-        // 毛玻璃观感：更低 alpha 透出桌面 + 更亮描边；纯色模式：较高 alpha 保证可读
+        // opacity 直接作为背景 alpha：1.0=不透明（默认），调低则透出桌面
+        // glassEffect 只切换视觉风格（底色/描边），不再二次压低透明度
         var baseHex = style.GlassEffect ? "#1C1C22" : "#141418";
-        var alpha = style.GlassEffect
-            ? Math.Clamp(style.Opacity * 0.78, 0.15, 1.0)
-            : Math.Clamp(style.Opacity, 0.30, 1.0);
+        var alpha = Math.Clamp(style.Opacity, 0.0, 1.0);
         RootBorder.Background = CategoryInfo.BrushWithAlpha(baseHex, alpha);
 
         // 描边：玻璃模式用更亮的半透明白，增强“霜面”边界感
