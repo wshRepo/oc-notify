@@ -230,13 +230,39 @@ async function shouldNotify(cfg: PluginCfg): Promise<boolean> {
 
 const PIPE_PATH = "\\\\.\\pipe\\oc-notify";
 
+/** OcNotify.exe 在 opencode 配置目录 assets/OcNotify 下（不放 plugins，避免被当脚本加载）。 */
+const OC_NOTIFY_EXE = join(homedir(), ".config", "opencode", "assets", "OcNotify", "OcNotify.exe");
+
+/**
+ * 确保 OcNotify.exe 在运行（首个 CLI 启动时拉起，后续 CLI 因管道已存在而跳过）。
+ * exe 自带单实例 Mutex，竞态下多 spawn 一次也只会存活一个。
+ * 空闲回收在 exe 侧：无 opencode 进程约 20s 后自动退出。
+ */
+function ensureOcNotifyRunning(): void {
+  try {
+    if (existsSync(PIPE_PATH)) {
+      debugLog("ensureOcNotify: pipe already up, skip spawn");
+      return;
+    }
+    if (!existsSync(OC_NOTIFY_EXE)) {
+      debugLog(`ensureOcNotify: exe missing at ${OC_NOTIFY_EXE}`, "WARN");
+      return;
+    }
+    // 不 await 退出——exe 是长驻进程；Mutex 保证单实例
+    Bun.spawn([OC_NOTIFY_EXE], { stdout: "ignore", stderr: "ignore" });
+    debugLog(`ensureOcNotify: spawned ${OC_NOTIFY_EXE}`);
+  } catch (e) {
+    debugLog(`ensureOcNotify failed: ${String(e)}`, "ERROR");
+  }
+}
+
 /**
  * 发送一行 JSON 到 OcNotify 管道。
  * 用 fs 打开命名管道（Windows 上 \\.\pipe\name 可当文件写），
  * 不用 node:net——Bun 的 net.connect 对命名管道不可靠（ECONNREFUSED）。
- * 同步短操作 + try-catch，失败静默，绝不拖垮事件处理。
+ * 首个 CLI 刚拉起 exe 时管道可能尚未就绪，失败后最多重试 2 次（间隔 500ms）。
  */
-function sendPipe(jsonLine: string): void {
+function sendPipe(jsonLine: string, attempt = 0): void {
   debugLog(`sendPipe → ${jsonLine}`);
   let fd: number | null = null;
   try {
@@ -244,7 +270,11 @@ function sendPipe(jsonLine: string): void {
     writeSync(fd, jsonLine + "\n");
     debugLog("sendPipe ✓ written");
   } catch (e) {
-    debugLog(`sendPipe ✗ ${String(e)}`, "ERROR");
+    debugLog(`sendPipe ✗ attempt=${attempt} ${String(e)}`, "ERROR");
+    // 管道未就绪时短暂重试（exe 刚 spawn 的冷启动窗口）
+    if (attempt < 2) {
+      setTimeout(() => sendPipe(jsonLine, attempt + 1), 500);
+    }
   } finally {
     if (fd !== null) {
       try {
@@ -296,6 +326,9 @@ export const NotifyBubblePlugin: Plugin = async (input: PluginInput): Promise<Ho
   );
   ancestorPids = await collectAncestorPids();
   debugLog(`ancestors=[${[...ancestorPids].join(",")}] count=${ancestorPids.size}`);
+
+  // 确保气泡服务在跑：首个 CLI 拉起，后续检测到管道直接跳过
+  ensureOcNotifyRunning();
 
   // --- 反误报状态 ---
   /** sessionID → 最近一次 busy 时间（短任务过滤用） */

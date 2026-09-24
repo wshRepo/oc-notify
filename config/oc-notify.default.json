@@ -12,7 +12,9 @@
     "maxVisible": 5,
     "clickToDismiss": true,
     "onlyWhenInactive": true,
-    "debug": false
+    "debug": false,
+    "idleCheckIntervalMs": 30000,
+    "idleRetry": 2
   },
   "events": {
     "sessionIdle": true,

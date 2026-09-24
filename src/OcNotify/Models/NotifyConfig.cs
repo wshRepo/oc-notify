@@ -106,6 +106,20 @@ public sealed class BehaviorConfig
     /// </summary>
     [JsonPropertyName("debug")]
     public bool Debug { get; set; }
+
+    /// <summary>
+    /// 空闲检查间隔（毫秒，默认 30s）。
+    /// exe 周期检查是否还有 opencode 进程，全部退出后自动关闭本进程。
+    /// </summary>
+    [JsonPropertyName("idleCheckIntervalMs")]
+    public int IdleCheckIntervalMs { get; set; } = 30_000;
+
+    /// <summary>
+    /// 空闲退出重试次数（默认 2 次）。
+    /// 连续 N 次检查未发现 opencode 进程才退出；总宽限 ≈ interval × retry。
+    /// </summary>
+    [JsonPropertyName("idleRetry")]
+    public int IdleRetry { get; set; } = 2;
 }
 
 /// <summary>各提醒事件启用开关。</summary>
