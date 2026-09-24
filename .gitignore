@@ -1,0 +1,14 @@
+# .NET 构建产物
+bin/
+obj/
+
+# IDE
+.vs/
+*.user
+*.suo
+
+# 测试截图
+scripts/*.png
+
+# 日志
+*.log

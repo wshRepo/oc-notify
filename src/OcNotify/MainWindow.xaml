@@ -1,0 +1,39 @@
+﻿<Window x:Class="OcNotify.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="OcNotify"
+        Width="392"
+        SizeToContent="Height"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="{x:Null}"
+        ShowInTaskbar="False"
+        Topmost="True"
+        ResizeMode="NoResize"
+        WindowStartupLocation="Manual"
+        SnapsToDevicePixels="True"
+        UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Display"
+        SourceInitialized="OnSourceInitialized">
+    <!--
+      气泡容器窗口：
+      - AllowsTransparency=True + Background=null：窗口完全透明，任何位置都看不到窗口本体
+      - 毛玻璃仅体现在卡片背景半透明（窗口级 backdrop 会刷出可见矩形，已弃用）
+      - SizeToContent=Height 随内容增高；四角定位由 code-behind 锚点规则驱动
+      - Background=null 区域点击穿透到桌面
+    -->
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="0"
+                      ResizeBorderThickness="0"
+                      GlassFrameThickness="0"
+                      CornerRadius="0"
+                      UseAeroCaptionButtons="False"/>
+    </WindowChrome.WindowChrome>
+
+    <Grid x:Name="RootGrid" Background="{x:Null}">
+        <StackPanel x:Name="CardsPanel"
+                    Orientation="Vertical"
+                    Background="{x:Null}"
+                    Margin="12"/>
+    </Grid>
+</Window>

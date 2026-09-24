@@ -1,0 +1,21 @@
+{
+  "style": {
+    "opacity": 0.95,
+    "glassEffect": true,
+    "accentColor": "#7C9CFF",
+    "cornerRadius": 14,
+    "position": "top-right"
+  },
+  "behavior": {
+    "durationMs": 5000,
+    "maxVisible": 5,
+    "clickToDismiss": true
+  },
+  "events": {
+    "sessionIdle": true,
+    "permissionAsk": true,
+    "questionAsk": true,
+    "sessionError": true,
+    "subagentDone": true
+  }
+}

@@ -1,0 +1,76 @@
+<UserControl x:Class="OcNotify.Controls.NotificationCard"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:models="clr-namespace:OcNotify.Models"
+             mc:Ignorable="d"
+             d:DesignHeight="72" d:DesignWidth="360"
+             Width="360"
+             Background="{x:Null}"
+             MouseLeftButtonDown="OnMouseLeftButtonDown">
+    <!--
+      单个气泡卡片视觉根。
+      结构：左侧分类色条 + 右侧两行文本（分类标签 / 会话标题）。
+      动画由 code-behind 驱动（进入滑入、消失渐隐+收拢）。
+      Background 为 null 时卡片外区域不命中点击，保证缝隙穿透到桌面。
+    -->
+    <UserControl.Resources>
+        <DropShadowEffect x:Key="CardShadow"
+                          BlurRadius="18"
+                          ShadowDepth="2"
+                          Direction="270"
+                          Opacity="0.45"
+                          Color="#000000"/>
+    </UserControl.Resources>
+
+    <UserControl.RenderTransform>
+        <TranslateTransform x:Name="SlideTransform" Y="0"/>
+    </UserControl.RenderTransform>
+    <UserControl.Opacity>1</UserControl.Opacity>
+
+    <Border x:Name="RootBorder"
+            CornerRadius="14"
+            BorderThickness="1"
+            BorderBrush="#22FFFFFF"
+            Padding="14,12,14,12"
+            Effect="{StaticResource CardShadow}"
+            SnapsToDevicePixels="True"
+            TextOptions.TextFormattingMode="Display">
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="4"/>
+                <ColumnDefinition Width="12"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- 左侧分类色条 -->
+            <Border x:Name="AccentBar"
+                    Grid.Column="0"
+                    CornerRadius="2"
+                    Width="4"
+                    HorizontalAlignment="Stretch"
+                    Margin="0,2,0,2"
+                    Background="#4ADE80"/>
+
+            <!-- 文本区 -->
+            <StackPanel Grid.Column="2" Orientation="Vertical" VerticalAlignment="Center">
+                <!-- 分类标签 -->
+                <TextBlock x:Name="LabelText"
+                           Text="对话完成"
+                           FontSize="11"
+                           FontWeight="SemiBold"
+                           Foreground="#4ADE80"
+                           Margin="0,0,0,3"/>
+                <!-- 会话标题 -->
+                <TextBlock x:Name="TitleText"
+                           Text="session"
+                           FontSize="13.5"
+                           FontWeight="Medium"
+                           Foreground="#F5F5F5"
+                           TextTrimming="CharacterEllipsis"
+                           MaxWidth="300"/>
+            </StackPanel>
+        </Grid>
+    </Border>
+</UserControl>

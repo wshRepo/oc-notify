@@ -1,0 +1,187 @@
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using OcNotify.Helpers;
+using OcNotify.Models;
+
+namespace OcNotify.Controls;
+
+/// <summary>
+/// 单个气泡卡片：负责绑定 <see cref="NotificationItem"/>、播放进入/消失动画、
+/// 处理点击关闭。动画完成后通过事件通知上层从集合移除。
+/// </summary>
+public partial class NotificationCard : UserControl
+{
+    /// <summary>消失动画（渐隐 + 收拢）完成事件，参数为对应的通知项。</summary>
+    public event Action<NotificationItem>? ExitCompleted;
+
+    /// <summary>点击关闭请求（上层决定是否允许并执行 Dismiss）。</summary>
+    public event Action<NotificationItem>? DismissRequested;
+
+    /// <summary>当前绑定的通知项。</summary>
+    public NotificationItem? Item { get; private set; }
+
+    private bool _enterPlayed;
+    private bool _exitStarted;
+
+    /// <summary>
+    /// 构造：初始化 XAML。
+    /// </summary>
+    public NotificationCard()
+    {
+        InitializeComponent();
+    }
+
+    /// <summary>
+    /// 绑定数据并应用样式（颜色/透明度/圆角来自配置与分类元数据）。
+    /// 毛玻璃开：卡片背景更透 + 亮边框模拟霜面；关：更实的深色背景。
+    /// 窗口本身始终全透明，不依赖窗口级 backdrop（避免可见灰色矩形）。
+    /// </summary>
+    /// <param name="item">通知项。</param>
+    /// <param name="style">当前样式配置。</param>
+    public void Bind(NotificationItem item, StyleConfig style)
+    {
+        Item = item;
+
+        LabelText.Text = item.Label;
+        TitleText.Text = item.SessionTitle;
+
+        var color = CategoryInfo.ParseColor(item.CategoryColor);
+        AccentBar.Background = new SolidColorBrush(color);
+        LabelText.Foreground = new SolidColorBrush(color);
+
+        // 毛玻璃观感：更低 alpha 透出桌面 + 更亮描边；纯色模式：较高 alpha 保证可读
+        var baseHex = style.GlassEffect ? "#1C1C22" : "#141418";
+        var alpha = style.GlassEffect
+            ? Math.Clamp(style.Opacity * 0.78, 0.15, 1.0)
+            : Math.Clamp(style.Opacity, 0.30, 1.0);
+        RootBorder.Background = CategoryInfo.BrushWithAlpha(baseHex, alpha);
+
+        // 描边：玻璃模式用更亮的半透明白，增强“霜面”边界感
+        var borderHex = style.GlassEffect ? "#38FFFFFF" : "#22FFFFFF";
+        RootBorder.BorderBrush = CategoryInfo.BrushWithAlpha(borderHex, 1.0);
+
+        RootBorder.CornerRadius = new CornerRadius(style.CornerRadius);
+        AccentBar.CornerRadius = new CornerRadius(2);
+    }
+
+    /// <summary>
+    /// 播放进入动画 + 淡入。只播一次。
+    /// top 锚点：新卡在堆叠底部 → 从下方滑入（Y+24→0）。
+    /// bottom 锚点：新卡在堆叠顶部 → 从上方滑入（Y-24→0）。
+    /// </summary>
+    /// <param name="fromTop">true=从上方滑入（bottom 锚点用）；false=从下方滑入。</param>
+    public void PlayEnter(bool fromTop = false)
+    {
+        if (_enterPlayed)
+        {
+            return;
+        }
+
+        _enterPlayed = true;
+
+        var startOffset = fromTop ? -24.0 : 24.0;
+
+        Opacity = 0;
+        SlideTransform.Y = startOffset;
+
+        var opacityAnim = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(280))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+        };
+        var slideAnim = new DoubleAnimation(startOffset, 0, TimeSpan.FromMilliseconds(280))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+        };
+
+        BeginAnimation(OpacityProperty, opacityAnim);
+        SlideTransform.BeginAnimation(System.Windows.Media.TranslateTransform.YProperty, slideAnim);
+    }
+
+    /// <summary>
+    /// 播放消失动画：先渐隐（保持占位）→ 再收拢高度（驱动下方卡片上移）。
+    /// 完成后触发 <see cref="ExitCompleted"/>。
+    /// </summary>
+    public void PlayExit()
+    {
+        if (_exitStarted)
+        {
+            return;
+        }
+
+        _exitStarted = true;
+        IsHitTestVisible = false;
+
+        // 阶段 1：渐隐 300ms（保持占位，此时下方不动）
+        var fade = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(300))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn },
+            FillBehavior = FillBehavior.Stop,
+        };
+
+        fade.Completed += (_, _) =>
+        {
+            Opacity = 0;
+
+            // 阶段 2：收拢高度 300ms（Margin+MaxHeight 同步动画，StackPanel 重排）
+            var targetHeight = ActualHeight > 0 ? ActualHeight : 72;
+            MaxHeight = targetHeight;
+
+            var collapseH = new DoubleAnimation(targetHeight, 0, TimeSpan.FromMilliseconds(300))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut },
+                FillBehavior = FillBehavior.Stop,
+            };
+
+            // Margin 收拢到 0，消除残留间隙
+            var collapseM = new ThicknessAnimation(
+                Margin,
+                new Thickness(0),
+                TimeSpan.FromMilliseconds(300))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut },
+                FillBehavior = FillBehavior.Stop,
+            };
+
+            Storyboard.SetTarget(collapseH, this);
+            Storyboard.SetTargetProperty(collapseH, new PropertyPath(MaxHeightProperty));
+
+            var sb = new Storyboard();
+            sb.Children.Add(collapseH);
+
+            // Margin 动画
+            Storyboard.SetTarget(collapseM, this);
+            Storyboard.SetTargetProperty(collapseM, new PropertyPath(MarginProperty));
+            sb.Children.Add(collapseM);
+
+            sb.Completed += (_, _) =>
+            {
+                MaxHeight = 0;
+                Margin = new Thickness(0);
+                ExitCompleted?.Invoke(Item!);
+            };
+
+            sb.Begin();
+        };
+
+        BeginAnimation(OpacityProperty, fade);
+    }
+
+    /// <summary>
+    /// 点击卡片：请求关闭（是否允许由上层配置决定）。
+    /// </summary>
+    /// <param name="sender">事件源。</param>
+    /// <param name="e">事件参数。</param>
+    private void OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (Item is null || Item.IsExiting || !Item.ClickToDismiss)
+        {
+            return;
+        }
+
+        DismissRequested?.Invoke(Item);
+        e.Handled = true;
+    }
+}
