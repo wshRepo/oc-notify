@@ -19,6 +19,12 @@ namespace OcNotify;
 /// </summary>
 public partial class MainWindow : Window
 {
+    /// <summary>
+    /// 卡片间距（DIP）。方向随锚点变化：top 锚点加在卡片下方、bottom 锚点加在上方，
+    /// 保证固定边到第一张卡片的距离恒定（仅16px 配置边距），间距不参与锚点计算。
+    /// </summary>
+    private const double CardGap = 8.0;
+
     private readonly ConfigService _configService;
     private readonly NotificationManager _manager;
 
@@ -70,6 +76,7 @@ public partial class MainWindow : Window
         var cfg = _configService.Current;
         var card = new NotificationCard();
         card.Bind(item, cfg.Style);
+        ApplyCardSpacing(card);
 
         card.ExitCompleted += it =>
         {
@@ -189,7 +196,22 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 刷新所有已渲染卡片样式（透明度/圆角/毛玻璃观感）。
+    /// 按锚点方向设置卡片间距：
+    /// - top 锚点（左上/右上）：间距加在每张卡片下方
+    /// - bottom 锚点（左下/右下）：间距加在每张卡片上方
+    /// 固定边一侧保持0 间距，锚点定位只依赖16px 配置边距，避免间距混入位置计算。
+    /// </summary>
+    /// <param name="card">目标卡片。</param>
+    private void ApplyCardSpacing(NotificationCard card)
+    {
+        card.Margin = IsBottomAnchor
+            ? new Thickness(0, CardGap, 0, 0)
+            : new Thickness(0, 0, 0, CardGap);
+    }
+
+    /// <summary>
+    /// 刷新所有已渲染卡片样式（透明度/圆角/毛玻璃观感/间距方向）。
+    /// position 变更时间距方向需同步翻转。
     /// </summary>
     /// <param name="cfg">新配置。</param>
     private void RefreshCardStyles(NotifyConfig cfg)
@@ -199,6 +221,7 @@ public partial class MainWindow : Window
             if (child is NotificationCard card && card.Item is not null)
             {
                 card.Bind(card.Item, cfg.Style);
+                ApplyCardSpacing(card);
             }
         }
     }

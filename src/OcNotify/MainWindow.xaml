@@ -31,9 +31,14 @@
     </WindowChrome.WindowChrome>
 
     <Grid x:Name="RootGrid" Background="{x:Null}">
+        <!--
+          垂直 Margin=0：锚点边只算配置的16px，不被容器内边距干扰；
+          卡片间距由 code-behind 按锚点方向加在卡片上（上角在下、下角在上）。
+          水平 Margin=12：卡片(360)与窗口(392)之间的左右留白。
+        -->
         <StackPanel x:Name="CardsPanel"
                     Orientation="Vertical"
                     Background="{x:Null}"
-                    Margin="12"/>
+                    Margin="12,0"/>
     </Grid>
 </Window>
