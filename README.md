@@ -3,11 +3,13 @@
 [English](README.en.md) | **简体中文**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
+![Platform](https://img.shields.io/badge/platform-Windows%20only-blue)
 ![.NET](https://img.shields.io/badge/.NET-8.0-512BD4)
 ![opencode](https://img.shields.io/badge/opencode-v1.18%2B-000000)
 
-为 **[opencode](https://opencode.ai) CLI** 定制的桌面气泡通知工具：对话完成、权限请求、AI 提问、会话错误、子代理完成时，在屏幕角落弹出现代化气泡提醒。
+**Windows 专属**的 **[opencode](https://opencode.ai) CLI** 桌面气泡通知工具：对话完成、权限请求、AI 提问、会话错误、子代理完成时，在屏幕角落弹出现代化气泡提醒。
+
+> ⚠️ **仅支持 Windows 10/11** — 基于 WPF / 命名管道 / PowerShell 实现，**macOS、Linux 不支持**，也不计划支持。
 
 - **✨ WinUI 3 风格设计** — 微软 Fluent Design 设计语言：圆角卡片、流畅动画、毛玻璃观感
 - **🚫 不依赖 Windows Toast** — 完全自绘 WPF 透明窗口，样式自由、动画流畅、不受系统通知限制
@@ -68,7 +70,7 @@
 
 | 项 | 要求 |
 |----|------|
-| OS | Windows 10/11（透明与定位不依赖 Win11；毛玻璃/系统圆角在 Win11 最佳） |
+| OS | **仅 Windows 10/11 x64**（macOS / Linux 不支持；透明与定位不依赖 Win11，毛玻璃/系统圆角在 Win11 最佳） |
 | .NET | .NET 8 **Desktop Runtime**（x64） |
 | opencode | v1.18+（v1 插件接口 `@opencode-ai/plugin`） |
 

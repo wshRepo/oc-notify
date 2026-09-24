@@ -3,11 +3,13 @@
 **English** | [简体中文](README.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
+![Platform](https://img.shields.io/badge/platform-Windows%20only-blue)
 ![.NET](https://img.shields.io/badge/.NET-8.0-512BD4)
 ![opencode](https://img.shields.io/badge/opencode-v1.18%2B-000000)
 
-Desktop bubble notifications for **[opencode](https://opencode.ai) CLI**: pop modern toast-style bubbles in the corner of your screen when a reply finishes, a permission is requested, AI asks a question, a session errors, or a subagent completes.
+**Windows-only** desktop bubble notifications for **[opencode](https://opencode.ai) CLI**: pop modern toast-style bubbles in the corner of your screen when a reply finishes, a permission is requested, AI asks a question, a session errors, or a subagent completes.
+
+> ⚠️ **Windows 10/11 only** — built on WPF / named pipes / PowerShell. **macOS and Linux are not supported** and are not planned.
 
 - **✨ WinUI 3 style design** — Microsoft Fluent Design language: rounded cards, smooth animations, frosted-glass look
 - **🚫 No Windows Toast dependency** — fully custom WPF transparent window; free-form styling, fluid animations, no system notification limits
@@ -68,7 +70,7 @@ Labels follow `style.language`: Chinese by default (对话完成 / 权限请求 
 
 | Item | Requirement |
 |------|-------------|
-| OS | Windows 10/11 (transparency/positioning work without Win11; frosted glass & system corners look best on Win11) |
+| OS | **Windows 10/11 x64 only** (macOS / Linux not supported; transparency/positioning work without Win11, frosted glass & system corners look best on Win11) |
 | .NET | .NET 8 **Desktop Runtime** (x64) |
 | opencode | v1.18+ (v1 plugin API `@opencode-ai/plugin`) |
 
