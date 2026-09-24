@@ -236,9 +236,15 @@ const OC_NOTIFY_EXE = join(homedir(), ".config", "opencode", "assets", "OcNotify
 /**
  * 确保 OcNotify.exe 在运行（首个 CLI 启动时拉起，后续 CLI 因管道已存在而跳过）。
  * exe 自带单实例 Mutex，竞态下多 spawn 一次也只会存活一个。
- * 空闲回收在 exe 侧：无 opencode 进程约 20s 后自动退出。
+ * 空闲回收在 exe 侧：无 opencode 进程约 60s（默认 30s×2）后自动退出。
+ *
+ * 必须经 `cmd /c start "" /b` 跳板启动：Bun/libuv 在 Windows 上把直接
+ * 子进程放进 kill-on-close Job Object，直接 spawn 的 exe 会在 opencode
+ * 退出瞬间被内核连带杀死，永远活不到自己的 60s 空闲回收（Bun #31603，
+ * `detached: true` 无效）。跳板产生的孙进程因 Job 带 SILENT_BREAKAWAY_OK
+ * 而脱离 Job，可独立存活，由 exe 自己的空闲回收决定退出时机。
  */
-function ensureOcNotifyRunning(): void {
+async function ensureOcNotifyRunning(): Promise<void> {
   try {
     if (existsSync(PIPE_PATH)) {
       debugLog("ensureOcNotify: pipe already up, skip spawn");
@@ -248,9 +254,16 @@ function ensureOcNotifyRunning(): void {
       debugLog(`ensureOcNotify: exe missing at ${OC_NOTIFY_EXE}`, "WARN");
       return;
     }
-    // 不 await 退出——exe 是长驻进程；Mutex 保证单实例
-    Bun.spawn([OC_NOTIFY_EXE], { stdout: "ignore", stderr: "ignore" });
-    debugLog(`ensureOcNotify: spawned ${OC_NOTIFY_EXE}`);
+    // await cmd 退出：确保 start 已真正拉起 exe 后插件初始化才继续；
+    // exe 是长驻进程，由 start 放后台（/b），cmd 立即返回
+    const boot = Bun.spawn(["cmd", "/c", "start", "", "/b", OC_NOTIFY_EXE], {
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "ignore",
+      windowsHide: true,
+    });
+    await boot.exited;
+    debugLog(`ensureOcNotify: spawned via start /b ${OC_NOTIFY_EXE}`);
   } catch (e) {
     debugLog(`ensureOcNotify failed: ${String(e)}`, "ERROR");
   }
@@ -328,7 +341,7 @@ export const NotifyBubblePlugin: Plugin = async (input: PluginInput): Promise<Ho
   debugLog(`ancestors=[${[...ancestorPids].join(",")}] count=${ancestorPids.size}`);
 
   // 确保气泡服务在跑：首个 CLI 拉起，后续检测到管道直接跳过
-  ensureOcNotifyRunning();
+  await ensureOcNotifyRunning();
 
   // --- 反误报状态 ---
   /** sessionID → 最近一次 busy 时间（短任务过滤用） */

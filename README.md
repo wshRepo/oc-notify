@@ -397,7 +397,7 @@ Get-Content "$env:TEMP\oc-notify-plugin.log" -Tail 50
 ### 单实例与空闲退出
 
 - **单实例**：`Mutex("Local\OcNotify.SingleInstance")`，第二个实例立即退出
-- **拉起**：插件 init 查管道，不存在则 `Bun.spawn` exe
+- **拉起**：插件 init 查管道，不存在则经 `cmd /c start "" /b` 跳板启动 exe（脱离 Bun 的 kill-on-close Job，避免 opencode 退出时被连带杀死）
 - **空闲退出**：`DispatcherTimer`（默认 30s×2 次 ≈ 60s）无 `opencode` 进程则退出；间隔/次数可配热更
 
 ### 插件线程模型（不阻塞 opencode）
