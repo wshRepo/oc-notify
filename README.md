@@ -1,168 +1,104 @@
 # oc-notify
 
-为 **opencode CLI** 定制的桌面气泡通知工具：对话完成、权限请求、AI 提问、会话错误、子代理完成时，在屏幕角落弹出现代化气泡提醒。
+[English](README.en.md) | **简体中文**
 
-> **✨ WinUI 3 风格设计** — 采用微软 Fluent Design 设计语言，圆角卡片、流畅动画、毛玻璃观感，美观精致。
-> **🚫 不使用 Windows 自带通知（Toast）** — 完全自绘 WPF 透明窗口，样式自由、动画流畅、不受系统限制。
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
+![.NET](https://img.shields.io/badge/.NET-8.0-512BD4)
+![opencode](https://img.shields.io/badge/opencode-v1.18%2B-000000)
+
+为 **[opencode](https://opencode.ai) CLI** 定制的桌面气泡通知工具：对话完成、权限请求、AI 提问、会话错误、子代理完成时，在屏幕角落弹出现代化气泡提醒。
+
+- **✨ WinUI 3 风格设计** — 微软 Fluent Design 设计语言：圆角卡片、流畅动画、毛玻璃观感
+- **🚫 不依赖 Windows Toast** — 完全自绘 WPF 透明窗口，样式自由、动画流畅、不受系统通知限制
+- **🧠 智能防打扰** — 仅在 opencode 非前台时弹窗，内置短任务过滤与权限消抖，安静不刷屏
+- **⚡ 零配置上手** — 一键部署，全配置热更新，保存即生效
 
 ![气泡效果预览](docs/Example.png)
+
+## 目录
+
+- [功能特性](#功能特性)
+- [环境要求](#环境要求)
+- [快速开始](#快速开始)
+- [使用](#使用)
+- [配置参考](#配置参考)
+- [故障排查](#故障排查)
+- [架构与原理](#架构与原理)
+- [开发指南](#开发指南)
+- [项目结构](#项目结构)
+- [许可](#许可)
 
 ---
 
 ## 功能特性
 
-### 提醒事件（5 类，均可单独开关）
+### 五类提醒事件（均可单独开关）
 
-| type | 触发时机 | 默认分类色（深色主题） |
-|------|----------|------------------------|
-| `sessionIdle` | AI 一轮回复完成（session.idle） | 绿 `#4ADE80` |
-| `permissionAsk` | 需要用户批准权限（permission.asked） | 琥珀 `#FBBF24` |
-| `questionAsk` | AI 向你提问（question.asked） | 紫 `#A78BFA` |
-| `sessionError` | 会话出错（session.error） | 红 `#F87171` |
-| `subagentDone` | 子代理/子任务完成（idle 且存在 parentID） | 蓝 `#38BDF8` |
+| type | 触发时机 | 深色主题分类色 |
+|------|----------|----------------|
+| `sessionIdle` | AI 一轮回复完成（`session.idle`） | 绿 `#4ADE80` |
+| `permissionAsk` | 需要用户批准权限（`permission.asked`） | 琥珀 `#FBBF24` |
+| `questionAsk` | AI 向你提问（`question.asked`） | 紫 `#A78BFA` |
+| `sessionError` | 会话出错（`session.error`） | 红 `#F87171` |
+| `subagentDone` | 子代理/子任务完成（idle 且存在 `parentID`） | 蓝 `#38BDF8` |
 
-### 气泡 UI（WinUI 3 风格）
+标签随 `style.language` 切换：默认中文（对话完成 / 权限请求 / …），`en` 时显示 Done / Permission / Question / Error / Subagent Done。
 
-- **Fluent Design 设计**：采用 WinUI 3 / Fluent Design 设计语言，现代化视觉体验
+### 气泡 UI（WinUI 3 / Fluent Design）
+
 - **精美卡片**：分类色条 + 标签 + 会话标题 + 圆角 + 阴影，层次分明
 - **四角停靠**：`top-left` / `top-right`（默认）/ `bottom-left` / `bottom-right`
-- **堆叠规则**：
-  - 上方两角：最高点固定，新气泡向下叠加，旧气泡消失后其余**上移**
-  - 下方两角：最低点固定，新气泡向上叠加，旧气泡消失后其余**下移**
-- **流畅动画**：进入滑入淡入 → 超时/点击渐隐收拢，动作连贯自然
+- **堆叠规则**：上方两角新气泡向下叠加、旧卡消失其余上移；下方两角反之
+- **流畅动画**：进入滑入淡入 → 超时/点击渐隐收拢
 - **双主题**：`light`（默认）/ `dark`，分类色自动切换保证对比度
-- **毛玻璃观感**：卡片半透明 + 亮描边，营造层次感（窗口本体始终全透明）
-- **多气泡**：同时最多 `maxVisible` 条，超出挤出最旧；卡片间距方向远离锚点边
-- **点击关闭**：可配置
+- **毛玻璃观感**：卡片半透明 + 亮描边（窗口本体始终全透明）
+- **多气泡**：同屏最多 `maxVisible` 条，超出挤出最旧；点击可关闭
 
 ### 智能行为
 
-- **仅非前台弹窗**（`onlyWhenInactive`，默认开）：opencode/终端处于前台时不打扰，切走或最小化后才弹
-- **反误报**：
-  - error 后 2s 内的 idle 不再二次弹窗
-  - busy→idle 不足 2s 视为短任务跳过
-  - 权限请求 300ms 消抖（自动批准的不弹）
-- **生命周期**：首个 opencode CLI 启动时自动拉起 `OcNotify.exe`；所有 CLI 退出后约 60s 自动关闭；单实例 Mutex 防重复
+- **仅非前台弹窗**（`onlyWhenInactive`，默认开）：opencode/终端处于前台时不打扰
+- **反误报**：error 后 2s 内的 idle 不二次弹窗；busy→idle 不足 2s 视为短任务跳过；权限请求 300ms 消抖
+- **自动生命周期**：首个 CLI 启动自动拉起 `OcNotify.exe`；全部退出后约 60s 自动关闭；单实例防重复
 - **全配置热更新**：改 JSON 即时生效，无需重启
 
-### 环境要求
+---
 
-- **OS**：Windows 10/11（透明与定位不依赖 Win11；毛玻璃观感/系统圆角在 Win11 最佳）
-- **.NET**：.NET 8 **Desktop Runtime**（x64）
-- **opencode**：v1.18+（使用 v1 插件接口 `@opencode-ai/plugin`）
-- 插件运行在 opencode 内置 Bun 中，无需单独安装 Node/Bun
+## 环境要求
+
+| 项 | 要求 |
+|----|------|
+| OS | Windows 10/11（透明与定位不依赖 Win11；毛玻璃/系统圆角在 Win11 最佳） |
+| .NET | .NET 8 **Desktop Runtime**（x64） |
+| opencode | v1.18+（v1 插件接口 `@opencode-ai/plugin`） |
+
+插件运行在 opencode 内置 Bun 中，**无需**单独安装 Node/Bun。
 
 ---
 
-## 使用
-
-### 日常流程
-
-安装并重启 opencode 后，**无需任何额外操作**：
-
-1. 在 opencode 中正常对话
-2. AI 回复完成、需要权限、向你提问等时机自动弹出气泡
-3. 气泡默认 **5 秒**自动消失，也可**点击立即关闭**
-4. 关闭所有 opencode 后约 **60 秒**，`OcNotify.exe` 自动退出；下次打开 opencode 时自动再拉起
-
-### 何时会弹、何时不弹
-
-| 场景 | 是否弹 |
-|------|--------|
-| 你切到了其他窗口 / 最小化了 opencode，回复完成 | ✅ 弹 |
-| 你正停在 opencode 前台（`onlyWhenInactive=true`，默认） | ❌ 不弹 |
-| 权限请求弹出后 300ms 内被自动批准 | ❌ 不弹（消抖） |
-| 会话刚出错，紧接着 idle | ❌ 不弹（避免双弹） |
-| busy→idle 不足 2 秒的短任务 | ❌ 不弹（降噪） |
-| 对应 `events.xxx` 被关掉 | ❌ 不弹 |
-
-想"前台也弹"：把配置里 `behavior.onlyWhenInactive` 改为 `false`，保存即生效。
-
-### 五类气泡长什么样
-
-- **对话完成 / 子代理完成**：绿色/蓝色条 + 标题为会话名
-- **权限请求**：琥珀色条
-- **问题询问**：紫色条
-- **会话错误**：红色条
-
-标签随 `style.language` 切换（默认中文；`en` 时显示 Done / Permission / Question / Error / Subagent Done）。
-
-多条同时到达时在配置的角落**堆叠**（默认右上、最多 5 条），最旧的超时后平滑消失、其余移动。
-
-### 配置调优示例
-
-```jsonc
-// ~\.config\opencode\oc-notify.json —— 保存即生效
-{
-  "style": {
-    "position": "bottom-right",  // 换到右下角
-    "theme": "dark",             // 深色主题
-    "opacity": 0.90              // 略微透明
-  },
-  "behavior": {
-    "durationMs": 8000,          // 停留 8 秒
-    "onlyWhenInactive": true
-  }
-}
-```
-
-**项目级配置**：在某个项目根目录放 `oc-notify.json`，可只写想覆盖的段（`style` / `behavior` / `events`），运行时与全局合并，仅对该项目生效。
-
-完整字段见 [配置参考](#配置参考)。
-
-### 不依赖 opencode 的手动测试
-
-```powershell
-# 单条（可指定分类）
-.\scripts\Send-TestNotification.ps1 -Type permissionAsk -Title "手动测试"
-
-# 连发 7 条：观察堆叠、挤出、进出场动画
-.\scripts\Send-StackTest.ps1 -Count 7
-
-# type 可选: sessionIdle | permissionAsk | questionAsk | sessionError | subagentDone
-```
-
-### 推荐验收清单
-
-- [x] 单条：从锚点方向滑入 → 5s 渐隐收拢消失
-- [x] 连发 7 条：稳定在 maxVisible，最旧被挤出
-- [x] 消失动画：先渐隐占位，再收拢，其余平滑移动
-- [x] 点击气泡立即消失
-- [x] 全部消失后窗口隐藏（任务栏无图标、不抢焦点）
-- [x] opencode 前台时不弹；切走后弹
-- [x] 改 `theme`/`position`/`durationMs` → 下一条通知即生效
-- [X] 开两个 opencode，关掉一个 → exe 不退；全关 → 约 60s 后 exe 退出
-- [x] 重复启动 exe → 只存活一个进程
-
----
-
-## 部署
+## 快速开始
 
 ### 方式一：一键部署（推荐）
 
-仓库 `deploy\` 目录内含完整部署包：
+仓库 [`deploy/`](deploy/) 目录内含完整部署包：
 
 ```
-deploy\
-├── install.bat              ← 双击运行
-└── files\                   ← 部署所需的全部文件
-    ├── notify-bubble.ts     插件
+deploy/
+├── install.bat                 ← 双击运行
+└── files/                      ← 部署所需的全部文件
+    ├── notify-bubble.ts        插件
     ├── oc-notify.default.json  默认配置模板
-    └── OcNotify\            气泡程序（exe + dll + 依赖）
+    └── OcNotify/               气泡程序（exe + dll + 依赖）
 ```
-
-**步骤**：
 
 1. **确认 .NET 8 Desktop Runtime（x64）已安装**
-   - 脚本会自动检测；未安装时会提示并给出下载地址后退出
+   - 脚本会自动检测；未安装时提示下载地址后退出
    - 下载页：<https://dotnet.microsoft.com/download/dotnet/8.0>
-   - 选择 **".NET Desktop Runtime 8.0.x (x64)"**（注意不是 ASP.NET Runtime，也不是仅 Runtime）
+   - 选择 **".NET Desktop Runtime 8.0.x (x64)"**（不是 ASP.NET Runtime，也不是仅 Runtime）
 2. **双击 `deploy\install.bat`**
-3. 脚本自动完成：
-   - 检测运行时 → 停止正在运行的 `OcNotify.exe`（避免文件占用）→ 创建目标目录 → 复制插件 / 程序 / 配置
-   - 结束后打印**部署报告**（每项 `[成功]` / `[跳过]` / `[失败]` 及目标路径），**窗口保持打开**，按任意键关闭
-4. **重启 opencode CLI**（插件只在启动时加载）
-5. 按上方[使用](#使用)验证
+3. 脚本自动完成：检测运行时 → 停止正在运行的 `OcNotify.exe` → 复制插件 / 程序 / 配置 → 打印部署报告
+4. **重启 opencode CLI**（插件仅在启动时加载）
+5. 按下方 [使用](#使用) 验证
 
 **目标位置**（脚本自动创建）：
 
@@ -172,18 +108,18 @@ deploy\
 | `files\OcNotify\*` | `%USERPROFILE%\.config\opencode\assets\OcNotify\` |
 | `files\oc-notify.default.json` | `%USERPROFILE%\.config\opencode\oc-notify.json` |
 
-> **配置保护**：若 `oc-notify.json` 已存在，脚本**跳过不覆盖**（报告中显示 `[跳过]`），保留你的现有配置。
+> **配置保护**：若 `oc-notify.json` 已存在，脚本**跳过不覆盖**，保留你的现有配置。
 
-**升级**：重新双击 `install.bat` 即可覆盖插件与程序文件；之后重启 opencode（及必要时重启 OcNotify，若被占用脚本已先杀进程）。
+**升级**：重新双击 `install.bat` 覆盖插件与程序文件，然后重启 opencode。
 
 ### 方式二：手动部署（PowerShell）
 
-无 bat 或需自定义时，从仓库根目录执行：
+从仓库根目录执行：
 
 ```powershell
-$cfg   = "$env:USERPROFILE\.config\opencode"
-$exe   = "$cfg\assets\OcNotify"
-$plug  = "$cfg\plugins"
+$cfg  = "$env:USERPROFILE\.config\opencode"
+$exe  = "$cfg\assets\OcNotify"
+$plug = "$cfg\plugins"
 
 New-Item -ItemType Directory -Force -Path $exe, $plug | Out-Null
 
@@ -199,44 +135,94 @@ if (-not (Test-Path "$cfg\oc-notify.json")) {
 }
 ```
 
-**升级**：重复上述 1、2 步，然后重启 `OcNotify.exe` 与 opencode。
+### 部署后验证
 
-**卸载**：
+```powershell
+# 启动程序并确认管道存在
+Start-Process "$env:USERPROFILE\.config\opencode\assets\OcNotify\OcNotify.exe"
+[System.IO.Directory]::GetFiles("\\.\pipe\") | ? { $_ -like "*oc-notify*" }
+
+# 不经插件直接发一条，应立刻在角落弹气泡
+.\scripts\Send-TestNotification.ps1 -Title "部署验证"
+```
+
+直发能弹 → exe/管道正常；仍不弹 → 问题在插件侧（记得重启 opencode）。
+
+### 卸载
 
 ```powershell
 Get-Process OcNotify -ErrorAction SilentlyContinue | Stop-Process -Force
 $cfg = "$env:USERPROFILE\.config\opencode"
 Remove-Item "$cfg\plugins\notify-bubble.ts" -Force -ErrorAction SilentlyContinue
 Remove-Item "$cfg\assets\OcNotify" -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item "$cfg\oc-notify.json" -Force -ErrorAction SilentlyContinue   # 一并删配置；只想保留配置则去掉这行
+Remove-Item "$cfg\oc-notify.json" -Force -ErrorAction SilentlyContinue   # 一并删配置；想保留配置则去掉这行
 ```
 
-### 部署后文件角色速记
+---
 
-```
-plugins\notify-bubble.ts      → opencode 启动时自动加载（监听事件、按需拉起 exe）
-assets\OcNotify\OcNotify.exe  → 气泡程序本体（单实例、约 60s 空闲自退）
-oc-notify.json                → 全局配置（保存即热更新，无需重启）
+## 使用
+
+### 日常流程
+
+安装并重启 opencode 后，**无需任何额外操作**：
+
+1. 在 opencode 中正常对话
+2. AI 回复完成、需要权限、向你提问等时机自动弹出气泡
+3. 气泡默认 **5 秒**自动消失，也可**点击立即关闭**
+4. 关闭所有 opencode 后约 **60 秒**，`OcNotify.exe` 自动退出；下次打开自动再拉起
+
+### 何时会弹、何时不弹
+
+| 场景 | 是否弹 |
+|------|--------|
+| 切到其他窗口 / 最小化 opencode，回复完成 | ✅ 弹 |
+| 正停在 opencode 前台（`onlyWhenInactive=true`，默认） | ❌ 不弹 |
+| 权限请求 300ms 内被自动批准 | ❌ 不弹（消抖） |
+| 会话刚出错，紧接着 idle | ❌ 不弹（避免双弹） |
+| busy→idle 不足 2 秒的短任务 | ❌ 不弹（降噪） |
+| 对应 `events.xxx` 被关掉 | ❌ 不弹 |
+
+想"前台也弹"：把 `behavior.onlyWhenInactive` 改为 `false`，保存即生效。
+
+### 配置调优示例
+
+```jsonc
+// %USERPROFILE%\.config\opencode\oc-notify.json —— 保存即生效
+{
+  "style": {
+    "position": "bottom-right",  // 换到右下角
+    "theme": "dark",             // 深色主题
+    "language": "en",            // 界面语言改英文
+    "opacity": 0.90              // 略微透明
+  },
+  "behavior": {
+    "durationMs": 8000,          // 停留 8 秒
+    "onlyWhenInactive": true
+  }
+}
 ```
 
-### 手动验证部署是否成功
+**项目级配置**：在项目根目录放 `oc-notify.json`，可只写想覆盖的段（`style` / `behavior` / `events`），运行时与全局合并，仅对该项目生效。
+
+完整字段见 [配置参考](#配置参考)。
+
+### 手动测试（不依赖 opencode）
 
 ```powershell
-# 程序与管道（可先手动启动 exe）
-Start-Process "$env:USERPROFILE\.config\opencode\assets\OcNotify\OcNotify.exe"
-[System.IO.Directory]::GetFiles("\\.\pipe\") | ? { $_ -like "*oc-notify*" }
+# 单条（可指定分类）
+.\scripts\Send-TestNotification.ps1 -Type permissionAsk -Title "手动测试"
 
-# 不经插件直接发一条，应立刻在右上角弹气泡
-.\scripts\Send-TestNotification.ps1 -Title "部署验证"
+# 连发 7 条：观察堆叠、挤出、进出场动画
+.\scripts\Send-StackTest.ps1 -Count 7
+
+# type 可选: sessionIdle | permissionAsk | questionAsk | sessionError | subagentDone
 ```
-
-若直发能弹 → exe/管道正常；问题若仍存在则在插件侧（记得重启 opencode）。
 
 ---
 
 ## 配置参考
 
-**全局配置**：`%USERPROFILE%\.config\opencode\oc-notify.json`  
+**全局配置**：`%USERPROFILE%\.config\opencode\oc-notify.json`
 **项目级配置**：`<项目根>\oc-notify.json`（按段覆盖全局）
 
 保存后**即时热更新**，无需重启任何进程。
@@ -303,6 +289,14 @@ Start-Process "$env:USERPROFILE\.config\opencode\assets\OcNotify\OcNotify.exe"
 
 五个 bool，对应五类提醒的启用开关；插件侧过滤，关闭后完全不发送管道消息。
 
+### 部署后文件角色速记
+
+```
+plugins\notify-bubble.ts      → opencode 启动时自动加载（监听事件、按需拉起 exe）
+assets\OcNotify\OcNotify.exe  → 气泡程序本体（单实例、约 60s 空闲自退）
+oc-notify.json                → 全局配置（保存即热更新，无需重启）
+```
+
 ---
 
 ## 故障排查
@@ -310,7 +304,7 @@ Start-Process "$env:USERPROFILE\.config\opencode\assets\OcNotify\OcNotify.exe"
 | 现象 | 排查 |
 |------|------|
 | 完全不弹窗 | ① `OcNotify.exe` 是否在跑 ② 管道是否存在：`[System.IO.Directory]::GetFiles("\\.\pipe\") \| ? { $_ -like "*oc-notify*" }` ③ 是否重启过 opencode（插件仅启动加载）④ `debug=true` 看 `%TEMP%\oc-notify-plugin.log` 是否有 `plugin init` |
-| 该弹没弹 | 开 `debug`：看日志是 `event` 未到、`skip: short task`、`skip: recent error`、还是 `emit skip ... foreground`（前台被拦属正常） |
+| 该弹没弹 | 开 `debug`：看日志是 `event` 未到、`skip: short task`、`skip: recent error`，还是 `emit skip ... foreground`（前台被拦属正常） |
 | 弹了但内容不对 | 检查 `sessionTitle`；日志 `emit [type] title=...` |
 | 气泡位置不对 | 确认 `style.position`；多显示器检查工作区；改完热更后发新通知 |
 | exe 不自动退出 | 是否还有 opencode 进程（含未关 CLI）；调小 `idleCheckIntervalMs`/`idleRetry` 验证 |
@@ -364,7 +358,7 @@ Get-Content "$env:TEMP\oc-notify-plugin.log" -Tail 50
               ▼
 ┌─────────────────────────────┐
 │  OcNotify.exe (WPF 常驻)    │
-│  ├ PipeServer   接收消息    │
+│  ├ PipeServer    接收消息   │
 │  ├ ConfigService 配置热更   │
 │  ├ NotificationManager 队列 │
 │  └ MainWindow   透明堆叠窗  │
@@ -505,6 +499,16 @@ Get-Process OcNotify -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Process "$env:USERPROFILE\.config\opencode\assets\OcNotify\OcNotify.exe"
 ```
 
+### 验收清单（提 PR 前自查）
+
+- [ ] 单条：从锚点方向滑入 → 5s 渐隐收拢消失
+- [ ] 连发 7 条：稳定在 maxVisible，最旧被挤出
+- [ ] 点击气泡立即消失；全部消失后窗口隐藏（任务栏无图标、不抢焦点）
+- [ ] opencode 前台时不弹；切走后弹
+- [ ] 改 `theme`/`position`/`durationMs`/`language` → 下一条通知即生效
+- [ ] 开两个 opencode，关掉一个 → exe 不退；全关 → 约 60s 后 exe 退出
+- [ ] 重复启动 exe → 只存活一个进程
+
 ### 关键设计约定
 
 1. **单位**：`SystemParameters.WorkArea` 与窗口坐标均为 **DIP**，禁止再乘 DPI（曾因混用导致定位偏移）
@@ -525,45 +529,42 @@ Start-Process "$env:USERPROFILE\.config\opencode\assets\OcNotify\OcNotify.exe"
 ## 项目结构
 
 ```
-oc-notify\
+oc-notify/
 ├── oc-notify.slnx                    # 解决方案
-├── deploy\
+├── deploy/
 │   ├── install.bat                   # 一键部署脚本
-│   └── files\                        # 分发文件包
+│   └── files/                        # 分发文件包
 │       ├── notify-bubble.ts
 │       ├── oc-notify.default.json
-│       └── OcNotify\                 # exe + dll + 依赖
-├── config\
+│       └── OcNotify/                 # exe + dll + 依赖
+├── config/
 │   └── oc-notify.default.json        # 默认配置模板（源）
-├── docs\
+├── docs/
 │   └── Example.png                   # README 截图（五类气泡效果）
-├── scripts\
+├── scripts/
 │   ├── Send-TestNotification.ps1     # 单条管道测试
 │   └── Send-StackTest.ps1            # 连发测试（堆叠/挤出）
-├── src\
-│   ├── OcNotify\                     # C# WPF 气泡程序
+├── src/
+│   ├── OcNotify/                     # C# WPF 气泡程序
 │   │   ├── OcNotify.csproj           # net8.0-windows / UseWPF
 │   │   ├── App.xaml(.cs)             # 单实例、服务编排、空闲自退
 │   │   ├── MainWindow.xaml(.cs)      # 透明容器窗、四角锚点、DPI 定位
-│   │   ├── Controls\
+│   │   ├── Controls/
 │   │   │   └── NotificationCard.xaml(.cs)  # 卡片样式 + 进出动画
-│   │   ├── Models\                   # NotifyConfig / NotifyMessage / NotificationItem
-│   │   ├── Services\                 # PipeServer / ConfigService / NotificationManager / DwmHelper
-│   │   └── Helpers\                  # CategoryInfo（分类色/标签双主题）
-│   └── plugin\
+│   │   ├── Models/                   # NotifyConfig / NotifyMessage / NotificationItem
+│   │   ├── Services/                 # PipeServer / ConfigService / NotificationManager / DwmHelper
+│   │   └── Helpers/                  # CategoryInfo（分类色/标签双语言双主题）
+│   └── plugin/
 │       └── notify-bubble.ts          # opencode 插件
 └── .gitignore
 ```
 
----
+### 已知可选增强
 
-## 已知可选增强
-
-- `dotnet publish /p:PublishSingleFile=true --self-contained` 收敛为单 exe（体积换便利）（用户需自行编译）。
+- `dotnet publish /p:PublishSingleFile=true --self-contained` 收敛为单 exe（体积换便利，需自行编译）
 
 ---
 
 ## 许可
 
 本项目采用 [MIT License](LICENSE) 开源许可。
-
