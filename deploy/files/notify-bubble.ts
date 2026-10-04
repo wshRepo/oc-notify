@@ -62,8 +62,12 @@ const DEFAULT_BEHAVIOR: BehaviorCfg = { onlyWhenInactive: true, debug: false };
  * 尾逗号一并移除是因为 C# 端（ConfigService）开启了 AllowTrailingCommas，
  * 两端解析行为必须一致——否则会出现通知正常、而插件侧 events/behavior
  * 静默回退默认值的不一致坑。
+ * BOM 一并剥离：C# 端 JsonDocument 能容忍 UTF-8 BOM 而 JSON.parse 不能，
+ * 不剥会导致同一文件 exe 能读、插件侧却静默回退默认值。
  */
 function stripJsonc(text: string): string {
+  // 剥掉 UTF-8 BOM（\uFEFF），否则 JSON.parse 抛 Unexpected token
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
   let out = "";
   /** out 中最近一个非字符串逗号的位置；-1 表示当前没有待判定的逗号 */
   let lastComma = -1;

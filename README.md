@@ -87,6 +87,7 @@
 ```
 deploy/
 ├── install.bat                 ← 双击运行
+├── merge-config.ps1            ← 配置智能合并脚本（install.bat 调用）
 └── files/                      ← 部署所需的全部文件
     ├── notify-bubble.ts        插件
     ├── oc-notify.default.jsonc  默认配置模板
@@ -98,7 +99,7 @@ deploy/
    - 下载页：<https://dotnet.microsoft.com/download/dotnet/8.0>
    - 选择 **".NET Desktop Runtime 8.0.x (x64)"**（不是 ASP.NET Runtime，也不是仅 Runtime）
 2. **双击 `deploy\install.bat`**
-3. 脚本自动完成：检测运行时 → 停止正在运行的 `OcNotify.exe` → 复制插件 / 程序 / 配置 → 打印部署报告
+3. 脚本自动完成：检测运行时 → 停止正在运行的 `OcNotify.exe` → 复制插件 / 程序 → 智能合并配置 → 自动启动新版 `OcNotify.exe`（若部署前正在运行）→ 打印部署报告
 4. **重启 opencode CLI**（插件仅在启动时加载）
 5. 按下方 [使用](#使用) 验证
 
@@ -110,9 +111,9 @@ deploy/
 | `files\OcNotify\*` | `%USERPROFILE%\.config\opencode\assets\OcNotify\` |
 | `files\oc-notify.default.jsonc` | `%USERPROFILE%\.config\opencode\oc-notify.jsonc` |
 
-> **配置保护**：若 `oc-notify.jsonc` 已存在，脚本**跳过不覆盖**，保留你的现有配置。
+> **配置保护（智能合并）**：若 `oc-notify.jsonc` 已存在，脚本**只增不删**：自动补齐模板新增字段（附带新注释），你的设置值、行注释、以及模板中已删除的旧字段（孤儿字段/段）一律原样保留；合并前自动备份为 `oc-notify.jsonc.bak`，解析失败时先备份再用模板重建（不静默覆盖）。
 
-**升级**：重新双击 `install.bat` 覆盖插件与程序文件，然后重启 opencode。
+**升级**：重新双击 `install.bat` 覆盖插件与程序文件、自动合并配置，然后重启 opencode。
 
 ### 方式二：手动部署（PowerShell）
 
@@ -131,10 +132,10 @@ dotnet publish src\OcNotify\OcNotify.csproj -c Release -o $exe /p:DebugType=none
 # 2. 部署插件
 Copy-Item src\plugin\notify-bubble.ts $plug -Force
 
-# 3. 配置（仅首次；已有配置请勿覆盖）
-if (-not (Test-Path "$cfg\oc-notify.jsonc")) {
-  Copy-Item config\oc-notify.default.jsonc "$cfg\oc-notify.jsonc"
-}
+# 3. 配置（首次创建；已有则智能合并：只增不删、用户值优先、自动备份 .bak）
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy\merge-config.ps1 `
+  -TemplatePath config\oc-notify.default.jsonc `
+  -TargetPath "$cfg\oc-notify.jsonc"
 ```
 
 ### 部署后验证
@@ -158,6 +159,7 @@ $cfg = "$env:USERPROFILE\.config\opencode"
 Remove-Item "$cfg\plugins\notify-bubble.ts" -Force -ErrorAction SilentlyContinue
 Remove-Item "$cfg\assets\OcNotify" -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item "$cfg\oc-notify.jsonc" -Force -ErrorAction SilentlyContinue   # 一并删配置；想保留配置则去掉这行
+Remove-Item "$cfg\oc-notify.jsonc.bak" -Force -ErrorAction SilentlyContinue   # 智能合并时产生的备份
 ```
 
 ---
@@ -535,6 +537,7 @@ oc-notify/
 ├── oc-notify.slnx                    # 解决方案
 ├── deploy/
 │   ├── install.bat                   # 一键部署脚本
+│   ├── merge-config.ps1              # 配置智能合并脚本
 │   └── files/                        # 分发文件包
 │       ├── notify-bubble.ts
 │       ├── oc-notify.default.jsonc

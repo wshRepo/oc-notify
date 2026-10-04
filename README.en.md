@@ -87,6 +87,7 @@ The repo's [`deploy/`](deploy/) directory ships a complete deployment package:
 ```
 deploy/
 ├── install.bat                 ← double-click to run
+├── merge-config.ps1            ← smart config merge script (called by install.bat)
 └── files/                      ← everything needed to deploy
     ├── notify-bubble.ts        plugin
     ├── oc-notify.default.jsonc  default config template
@@ -98,7 +99,7 @@ deploy/
    - Download: <https://dotnet.microsoft.com/download/dotnet/8.0>
    - Pick **".NET Desktop Runtime 8.0.x (x64)"** (not ASP.NET Runtime, not plain Runtime)
 2. **Double-click `deploy\install.bat`**
-3. The script detects the runtime → stops any running `OcNotify.exe` → copies plugin / app / config → prints a deployment report
+3. The script detects the runtime → stops any running `OcNotify.exe` → copies plugin / app → smart-merges the config → starts the new `OcNotify.exe` (if one was running) → prints a deployment report
 4. **Restart the opencode CLI** (plugins load only at startup)
 5. Verify with [Usage](#usage) below
 
@@ -110,9 +111,9 @@ deploy/
 | `files\OcNotify\*` | `%USERPROFILE%\.config\opencode\assets\OcNotify\` |
 | `files\oc-notify.default.jsonc` | `%USERPROFILE%\.config\opencode\oc-notify.jsonc` |
 
-> **Config protection**: if `oc-notify.jsonc` already exists, the script **skips it** and keeps your existing config.
+> **Config protection (smart merge)**: if `oc-notify.jsonc` already exists, the script **adds but never removes**: new template fields are appended (with their new comments), while your values, line comments, and fields/sections deleted from the template are kept as-is; the original is backed up to `oc-notify.jsonc.bak` before merging (if the file cannot be parsed, it is backed up first and rebuilt from the template — never silently overwritten).
 
-**Upgrade**: double-click `install.bat` again to overwrite plugin and app files, then restart opencode.
+**Upgrade**: double-click `install.bat` again to overwrite plugin and app files and merge the config, then restart opencode.
 
 ### Option B: Manual deploy (PowerShell)
 
@@ -131,10 +132,10 @@ dotnet publish src\OcNotify\OcNotify.csproj -c Release -o $exe /p:DebugType=none
 # 2. Deploy the plugin
 Copy-Item src\plugin\notify-bubble.ts $plug -Force
 
-# 3. Config (first time only; never overwrite an existing one)
-if (-not (Test-Path "$cfg\oc-notify.jsonc")) {
-  Copy-Item config\oc-notify.default.jsonc "$cfg\oc-notify.jsonc"
-}
+# 3. Config (creates on first run; smart-merges if present: add-only, user values win, auto-backup .bak)
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy\merge-config.ps1 `
+  -TemplatePath config\oc-notify.default.jsonc `
+  -TargetPath "$cfg\oc-notify.jsonc"
 ```
 
 ### Verify the deployment
@@ -158,6 +159,7 @@ $cfg = "$env:USERPROFILE\.config\opencode"
 Remove-Item "$cfg\plugins\notify-bubble.ts" -Force -ErrorAction SilentlyContinue
 Remove-Item "$cfg\assets\OcNotify" -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item "$cfg\oc-notify.jsonc" -Force -ErrorAction SilentlyContinue   # also removes config; drop this line to keep it
+Remove-Item "$cfg\oc-notify.jsonc.bak" -Force -ErrorAction SilentlyContinue   # backup created during smart merge
 ```
 
 ---
@@ -535,6 +537,7 @@ oc-notify/
 ├── oc-notify.slnx                    # solution
 ├── deploy/
 │   ├── install.bat                   # one-click deploy script
+│   ├── merge-config.ps1              # smart config merge script
 │   └── files/                        # distributable package
 │       ├── notify-bubble.ts
 │       ├── oc-notify.default.jsonc
