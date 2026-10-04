@@ -6,6 +6,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <!-- 产品版本：AssemblyVersion/FileVersion/deps.json 均自动跟随，发布前需与 install.bat 的 VERSION 同步 -->
+    <Version>1.0.1</Version>
   </PropertyGroup>
 
 </Project>
