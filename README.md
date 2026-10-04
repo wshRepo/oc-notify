@@ -248,6 +248,7 @@ Remove-Item "$cfg\oc-notify.jsonc.bak" -Force -ErrorAction SilentlyContinue   # 
     "durationMs": 5000,          // 气泡自动消失时间（毫秒）
     "maxVisible": 5,             // 最大同时显示条数，超出挤出最旧
     "clickToDismiss": true,      // 点击气泡立即关闭
+    "sticky": false,             // 粘性气泡：不自动消失，必须点击关闭（durationMs 失效，clickToDismiss 视为开启）
     "onlyWhenInactive": true,    // 仅 opencode 非前台时弹窗（推荐保持 true）
     "debug": false,              // 调试日志开关
     "idleCheckIntervalMs": 30000,// 空闲检测间隔（毫秒）
@@ -284,6 +285,7 @@ Remove-Item "$cfg\oc-notify.jsonc.bak" -Force -ErrorAction SilentlyContinue   # 
 | `durationMs` | int | `5000` | 自动消失毫秒数 |
 | `maxVisible` | int | `5` | 同屏最大气泡数 |
 | `clickToDismiss` | bool | `true` | 点击关闭 |
+| `sticky` | bool | `false` | 粘性气泡：不自动消失、必须点击关闭（`durationMs` 失效，`clickToDismiss` 视为开启） |
 | `onlyWhenInactive` | bool | `true` | 非前台才弹（检测在插件侧） |
 | `debug` | bool | `false` | 调试日志 |
 | `idleCheckIntervalMs` | int | `30000` | exe 空闲检查间隔 |

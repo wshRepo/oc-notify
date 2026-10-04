@@ -99,6 +99,14 @@ public sealed class BehaviorConfig
     public bool ClickToDismiss { get; set; } = true;
 
     /// <summary>
+    /// 粘性气泡（默认关）：开启后不启动自动消失计时，durationMs 不再生效；
+    /// 同时强制允许点击关闭，clickToDismiss 配置被视为开启。
+    /// 气泡仅在点击（或被 maxVisible 挤出）时消失。
+    /// </summary>
+    [JsonPropertyName("sticky")]
+    public bool Sticky { get; set; }
+
+    /// <summary>
     /// 仅在 opencode 非前台时弹窗（默认开）。
     /// 检测在插件侧完成（祖先进程链 + GetForegroundWindow），
     /// exe 收到消息即视为需要展示；此字段供配置读取与文档一致性。

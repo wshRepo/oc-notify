@@ -248,6 +248,7 @@ Saving **hot-reloads immediately** — no process restarts. The file is jsonc: `
     "durationMs": 5000,          // auto-dismiss time (ms)
     "maxVisible": 5,             // max simultaneous bubbles; oldest evicted
     "clickToDismiss": true,      // click a bubble to close it
+    "sticky": false,             // sticky bubble: stays until clicked (durationMs ignored, clickToDismiss forced on)
     "onlyWhenInactive": true,    // only pop when opencode is not focused (recommended)
     "debug": false,              // debug logging
     "idleCheckIntervalMs": 30000,// idle check interval (ms)
@@ -284,6 +285,7 @@ Saving **hot-reloads immediately** — no process restarts. The file is jsonc: `
 | `durationMs` | int | `5000` | Auto-dismiss milliseconds |
 | `maxVisible` | int | `5` | Max bubbles on screen |
 | `clickToDismiss` | bool | `true` | Click to close |
+| `sticky` | bool | `false` | Sticky bubble: never auto-dismisses, must click to close (`durationMs` ignored, `clickToDismiss` forced on) |
 | `onlyWhenInactive` | bool | `true` | Only pop when not focused (detection is plugin-side) |
 | `debug` | bool | `false` | Debug logging |
 | `idleCheckIntervalMs` | int | `30000` | exe idle check interval |

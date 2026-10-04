@@ -76,7 +76,8 @@ public sealed class NotificationManager
             Label = meta.Label,
             CategoryColor = meta.ColorHex,
             CreatedAtMs = message.Timestamp > 0 ? message.Timestamp : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-            ClickToDismiss = cfg.Behavior.ClickToDismiss,
+            // 粘性模式强制点击关闭：sticky 开启时 clickToDismiss 配置被忽略
+            ClickToDismiss = cfg.Behavior.ClickToDismiss || cfg.Behavior.Sticky,
         };
 
         // 超限挤出：立即从 Items 移除最旧以腾出槽位（动画是异步的，
@@ -92,7 +93,13 @@ public sealed class NotificationManager
         }
 
         Items.Add(item);
-        StartExpiryTimer(item, cfg.Behavior.DurationMs);
+
+        // 粘性模式不启动过期计时：气泡常驻，只能被点击或 maxVisible 挤出关闭，
+        // 此时 durationMs 配置被忽略（StartDismissCore 对无计时器项用 TryGetValue，安全）
+        if (!cfg.Behavior.Sticky)
+        {
+            StartExpiryTimer(item, cfg.Behavior.DurationMs);
+        }
 
         CardAdded?.Invoke(item);
     }
