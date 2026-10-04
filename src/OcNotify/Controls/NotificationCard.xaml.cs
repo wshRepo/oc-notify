@@ -11,6 +11,8 @@ namespace OcNotify.Controls;
 /// <summary>
 /// 单个气泡卡片：负责绑定 <see cref="NotificationItem"/>、播放进入/消失动画、
 /// 处理点击关闭。动画完成后通过事件通知上层从集合移除。
+/// 收拢方向由主窗口面板对齐决定（top 锚点向上收拢、bottom 锚点向下收拢），
+/// 卡片自身只做「渐隐 + 塌陷占位」这一套共用算法，不感知方向。
 /// </summary>
 public partial class NotificationCard : UserControl
 {
@@ -114,13 +116,16 @@ public partial class NotificationCard : UserControl
         };
 
         // 使用 BeginAnimation 而非 Storyboard：Storyboard 的 FillBehavior 默认 Stop
-        // 会在动画完成后恢复原值，与 SizeToContent 窗口高度计算冲突导致截断
+        // 会在动画完成后恢复原值，造成布局回弹抖动
         BeginAnimation(OpacityProperty, opacityAnim);
         SlideTransform.BeginAnimation(TranslateTransform.YProperty, slideAnim);
     }
 
     /// <summary>
-    /// 播放消失动画：先渐隐（保持占位）→ 再收拢高度（驱动下方卡片上移）。
+    /// 播放消失动画：先渐隐（保持占位）→ 再收拢高度（MaxHeight+Margin 同步塌陷，StackPanel 重排）。
+    /// 收拢方向由主窗口面板对齐决定，两种锚点共用本算法：
+    /// - top 锚点（面板贴上边）：空隙向上闭合 → 本卡下方的卡片上移补位，上方卡不动
+    /// - bottom 锚点（面板贴下边）：空隙向下闭合 → 本卡上方的卡片下移补位，下方卡不动
     /// 完成后触发 <see cref="ExitCompleted"/>。
     /// </summary>
     public void PlayExit()
