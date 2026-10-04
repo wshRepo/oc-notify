@@ -89,7 +89,7 @@ deploy/
 ├── install.bat                 ← 双击运行
 └── files/                      ← 部署所需的全部文件
     ├── notify-bubble.ts        插件
-    ├── oc-notify.default.json  默认配置模板
+    ├── oc-notify.default.jsonc  默认配置模板
     └── OcNotify/               气泡程序（exe + dll + 依赖）
 ```
 
@@ -108,9 +108,9 @@ deploy/
 |--------|------|
 | `files\notify-bubble.ts` | `%USERPROFILE%\.config\opencode\plugins\notify-bubble.ts` |
 | `files\OcNotify\*` | `%USERPROFILE%\.config\opencode\assets\OcNotify\` |
-| `files\oc-notify.default.json` | `%USERPROFILE%\.config\opencode\oc-notify.json` |
+| `files\oc-notify.default.jsonc` | `%USERPROFILE%\.config\opencode\oc-notify.jsonc` |
 
-> **配置保护**：若 `oc-notify.json` 已存在，脚本**跳过不覆盖**，保留你的现有配置。
+> **配置保护**：若 `oc-notify.jsonc` 已存在，脚本**跳过不覆盖**，保留你的现有配置。
 
 **升级**：重新双击 `install.bat` 覆盖插件与程序文件，然后重启 opencode。
 
@@ -132,8 +132,8 @@ dotnet publish src\OcNotify\OcNotify.csproj -c Release -o $exe /p:DebugType=none
 Copy-Item src\plugin\notify-bubble.ts $plug -Force
 
 # 3. 配置（仅首次；已有配置请勿覆盖）
-if (-not (Test-Path "$cfg\oc-notify.json")) {
-  Copy-Item config\oc-notify.default.json "$cfg\oc-notify.json"
+if (-not (Test-Path "$cfg\oc-notify.jsonc")) {
+  Copy-Item config\oc-notify.default.jsonc "$cfg\oc-notify.jsonc"
 }
 ```
 
@@ -157,7 +157,7 @@ Get-Process OcNotify -ErrorAction SilentlyContinue | Stop-Process -Force
 $cfg = "$env:USERPROFILE\.config\opencode"
 Remove-Item "$cfg\plugins\notify-bubble.ts" -Force -ErrorAction SilentlyContinue
 Remove-Item "$cfg\assets\OcNotify" -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item "$cfg\oc-notify.json" -Force -ErrorAction SilentlyContinue   # 一并删配置；想保留配置则去掉这行
+Remove-Item "$cfg\oc-notify.jsonc" -Force -ErrorAction SilentlyContinue   # 一并删配置；想保留配置则去掉这行
 ```
 
 ---
@@ -189,7 +189,7 @@ Remove-Item "$cfg\oc-notify.json" -Force -ErrorAction SilentlyContinue   # 一�
 ### 配置调优示例
 
 ```jsonc
-// %USERPROFILE%\.config\opencode\oc-notify.json —— 保存即生效
+// %USERPROFILE%\.config\opencode\oc-notify.jsonc —— 保存即生效
 {
   "style": {
     "position": "bottom-right",  // 换到右下角
@@ -204,7 +204,7 @@ Remove-Item "$cfg\oc-notify.json" -Force -ErrorAction SilentlyContinue   # 一�
 }
 ```
 
-**项目级配置**：在项目根目录放 `oc-notify.json`，可只写想覆盖的段（`style` / `behavior` / `events`），运行时与全局合并，仅对该项目生效。
+**项目级配置**：在项目根目录放 `oc-notify.jsonc`，可只写想覆盖的段（`style` / `behavior` / `events`），运行时与全局合并，仅对该项目生效。
 
 完整字段见 [配置参考](#配置参考)。
 
@@ -224,10 +224,10 @@ Remove-Item "$cfg\oc-notify.json" -Force -ErrorAction SilentlyContinue   # 一�
 
 ## 配置参考
 
-**全局配置**：`%USERPROFILE%\.config\opencode\oc-notify.json`
-**项目级配置**：`<项目根>\oc-notify.json`（按段覆盖全局）
+**全局配置**：`%USERPROFILE%\.config\opencode\oc-notify.jsonc`
+**项目级配置**：`<项目根>\oc-notify.jsonc`（按段覆盖全局）
 
-保存后**即时热更新**，无需重启任何进程。
+保存后**即时热更新**，无需重启任何进程。文件为 jsonc：支持 `//` 与 `/* */` 注释及尾逗号。
 
 ### 完整示例
 
@@ -296,7 +296,7 @@ Remove-Item "$cfg\oc-notify.json" -Force -ErrorAction SilentlyContinue   # 一�
 ```
 plugins\notify-bubble.ts      → opencode 启动时自动加载（监听事件、按需拉起 exe）
 assets\OcNotify\OcNotify.exe  → 气泡程序本体（单实例、约 60s 空闲自退）
-oc-notify.json                → 全局配置（保存即热更新，无需重启）
+oc-notify.jsonc               → 全局配置（保存即热更新，无需重启）
 ```
 
 ---
@@ -430,7 +430,7 @@ Get-Content "$env:TEMP\oc-notify-plugin.log" -Tail 50
   "sessionID": "ses_xxxxxxxx",
   "sessionTitle": "我的项目",
   "timestamp": 1790000000000,
-  "configPath": "D:\\proj\\oc-notify.json"
+  "configPath": "D:\\proj\\oc-notify.jsonc"
 }
 ```
 
@@ -481,7 +481,7 @@ dotnet publish src\OcNotify\OcNotify.csproj -c Release -o deploy\files\OcNotify 
 
 # 同步插件与配置模板到部署包
 Copy-Item src\plugin\notify-bubble.ts deploy\files\ -Force
-Copy-Item config\oc-notify.default.json deploy\files\ -Force
+Copy-Item config\oc-notify.default.jsonc deploy\files\ -Force
 ```
 
 ### 修改后的标准流程
@@ -537,10 +537,10 @@ oc-notify/
 │   ├── install.bat                   # 一键部署脚本
 │   └── files/                        # 分发文件包
 │       ├── notify-bubble.ts
-│       ├── oc-notify.default.json
+│       ├── oc-notify.default.jsonc
 │       └── OcNotify/                 # exe + dll + 依赖
 ├── config/
-│   └── oc-notify.default.json        # 默认配置模板（源）
+│   └── oc-notify.default.jsonc     # 默认配置模板（源）
 ├── docs/
 │   └── Example.png                   # README 截图（五类气泡效果）
 ├── scripts/

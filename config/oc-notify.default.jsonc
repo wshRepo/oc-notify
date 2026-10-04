@@ -1,0 +1,29 @@
+// oc-notify 默认配置模板（全局配置安装到 %USERPROFILE%\.config\opencode\oc-notify.jsonc）
+// 支持 // 与 /* */ 注释、尾逗号；保存即热生效，无需重启任何进程
+{
+  "style": {
+    "opacity": 0.90,             // 卡片背景不透明度 0.0~1.0，1.0=完全不透明
+    "glassEffect": true,         // 毛玻璃观感：true=半透明底+亮描边；false=纯色深底
+    "accentColor": "#7C9CFF",    // 未知分类时的强调色（色条/标签回退）
+    "cornerRadius": 14,          // 卡片圆角（DIP）
+    "position": "top-right",     // 停靠角：top-left | top-right | bottom-left | bottom-right
+    "theme": "light",            // 主题：light | dark
+    "language": "zh"             // 界面语言：zh（默认）| en
+  },
+  "behavior": {
+    "durationMs": 5000,          // 气泡自动消失时间（毫秒）
+    "maxVisible": 5,             // 最大同时显示条数，超出挤出最旧
+    "clickToDismiss": true,      // 点击气泡立即关闭
+    "onlyWhenInactive": true,    // 仅 opencode 非前台时弹窗（推荐保持 true）
+    "debug": false,              // 调试日志开关（开启后写入 %TEMP%\oc-notify-plugin.log）
+    "idleCheckIntervalMs": 30000,// 空闲检测间隔（毫秒）
+    "idleRetry": 2               // 连续 N 次未发现 opencode 才退出
+  },
+  "events": {
+    "sessionIdle": true,         // 对话完成
+    "permissionAsk": true,       // 权限请求
+    "questionAsk": true,         // AI 提问
+    "sessionError": true,        // 会话错误
+    "subagentDone": true         // 子代理完成
+  }
+}

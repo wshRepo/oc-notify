@@ -54,10 +54,83 @@ const DEFAULT_EVENTS: EventsCfg = {
 
 const DEFAULT_BEHAVIOR: BehaviorCfg = { onlyWhenInactive: true, debug: false };
 
+/**
+ * 剥离 JSONC 的注释（// 与 /* *\/）并移除尾逗号，得到 JSON.parse 可接受的纯 JSON。
+ *
+ * 必须用状态机逐字符处理，不能用正则：字符串值里可能包含 //（如 "http://..."），
+ * 正则会误删引号内的内容导致解析失败。
+ * 尾逗号一并移除是因为 C# 端（ConfigService）开启了 AllowTrailingCommas，
+ * 两端解析行为必须一致——否则会出现通知正常、而插件侧 events/behavior
+ * 静默回退默认值的不一致坑。
+ */
+function stripJsonc(text: string): string {
+  let out = "";
+  /** out 中最近一个非字符串逗号的位置；-1 表示当前没有待判定的逗号 */
+  let lastComma = -1;
+  let i = 0;
+
+  while (i < text.length) {
+    const c = text[i];
+
+    // 字符串原样拷贝到闭合引号：内部的 //、/* 只是普通字符
+    if (c === '"') {
+      const start = i++;
+      while (i < text.length) {
+        if (text[i] === "\\") {
+          i += 2;
+          continue;
+        }
+        if (text[i++] === '"') break;
+      }
+      out += text.slice(start, i);
+      continue;
+    }
+
+    if (c === "/" && text[i + 1] === "/") {
+      // 行注释：保留换行符，维持 JSON.parse 报错时的行号准确
+      while (i < text.length && text[i] !== "\n") i++;
+      continue;
+    }
+
+    if (c === "/" && text[i + 1] === "*") {
+      i += 2;
+      while (i < text.length && !(text[i] === "*" && text[i + 1] === "/")) {
+        if (text[i] === "\n") out += "\n";
+        i++;
+      }
+      i = Math.min(i + 2, text.length);
+      continue;
+    }
+
+    if (c === ",") {
+      lastComma = out.length;
+      out += c;
+      i++;
+      continue;
+    }
+
+    if (c === "}" || c === "]") {
+      // 逗号与其后的闭括号之间只有空白 → 判定为尾逗号，从输出中移除
+      if (lastComma >= 0 && !/[^\s]/.test(out.slice(lastComma + 1))) {
+        out = out.slice(0, lastComma) + out.slice(lastComma + 1);
+      }
+      lastComma = -1;
+      out += c;
+      i++;
+      continue;
+    }
+
+    out += c;
+    i++;
+  }
+
+  return out;
+}
+
 function readJson(path: string): Record<string, unknown> | null {
   try {
     if (!existsSync(path)) return null;
-    return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+    return JSON.parse(stripJsonc(readFileSync(path, "utf8"))) as Record<string, unknown>;
   } catch {
     return null;
   }
@@ -70,12 +143,12 @@ function pick<T extends object>(base: T, override: unknown): T {
 }
 
 /**
- * 加载配置：全局 ~/.config/opencode/oc-notify.json + 项目 directory/oc-notify.json。
+ * 加载配置：全局 ~/.config/opencode/oc-notify.jsonc + 项目 directory/oc-notify.jsonc。
  * 项目级覆盖全局的同名字段（events/behavior 分段合并）。
  */
 function loadConfig(directory: string): PluginCfg {
-  const globalPath = join(homedir(), ".config", "opencode", "oc-notify.json");
-  const projectPath = join(directory, "oc-notify.json");
+  const globalPath = join(homedir(), ".config", "opencode", "oc-notify.jsonc");
+  const projectPath = join(directory, "oc-notify.jsonc");
 
   const globalCfg = readJson(globalPath);
   const projectCfg = readJson(projectPath);

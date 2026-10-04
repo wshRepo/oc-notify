@@ -13,8 +13,8 @@ set "SRC=%~dp0files"
 set "CFG=%USERPROFILE%\.config\opencode"
 set "PLUGINS=%CFG%\plugins"
 set "ASSETS=%CFG%\assets\OcNotify"
-set "DEFAULT_JSON=%SRC%\oc-notify.default.json"
-set "USER_JSON=%CFG%\oc-notify.json"
+set "DEFAULT_JSON=%SRC%\oc-notify.default.jsonc"
+set "USER_JSON=%CFG%\oc-notify.jsonc"
 
 set /a OK=0
 set /a FAIL=0
@@ -107,7 +107,7 @@ for %%F in ("%SRC%\OcNotify\*.*") do (
 
 rem ---------- 6. 配置文件（已存在则保留用户配置） ----------
 if exist "%USER_JSON%" (
-    echo   [跳过] oc-notify.json 已存在，保留你的现有配置
+    echo   [跳过] oc-notify.jsonc 已存在，保留你的现有配置
     set /a SKIP+=1
 ) else (
     call :COPY_ONE "%DEFAULT_JSON%" "%USER_JSON%"
@@ -126,7 +126,7 @@ echo.
 echo 下一步:
 echo   1. 重启 opencode CLI（插件仅在启动时加载）
 echo   2. 发一条消息，切到其他窗口，等回复完成即应弹气泡
-echo   3. 修改配置请编辑上面的 oc-notify.json（保存即热生效）
+echo   3. 修改配置请编辑上面的 oc-notify.jsonc（保存即热生效）
 echo.
 if !FAIL! gtr 0 (
     echo 注意: 存在失败项，请检查上方 [失败] 信息后重试。

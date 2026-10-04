@@ -21,7 +21,7 @@ public sealed class ConfigService : IDisposable
         WriteIndented = true,
     };
 
-    /// <summary>全局配置文件绝对路径（~/.config/opencode/oc-notify.json）。</summary>
+    /// <summary>全局配置文件绝对路径（~/.config/opencode/oc-notify.jsonc）。</summary>
     public string GlobalConfigPath { get; }
 
     /// <summary>当前生效配置。</summary>
@@ -48,12 +48,12 @@ public sealed class ConfigService : IDisposable
         StartWatcher();
     }
 
-    /// <summary>默认全局配置路径：%USERPROFILE%\.config\opencode\oc-notify.json。</summary>
+    /// <summary>默认全局配置路径：%USERPROFILE%\.config\opencode\oc-notify.jsonc。</summary>
     /// <returns>绝对路径。</returns>
     public static string GetDefaultGlobalPath()
     {
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return Path.Combine(home, ".config", "opencode", "oc-notify.json");
+        return Path.Combine(home, ".config", "opencode", "oc-notify.jsonc");
     }
 
     /// <summary>

@@ -89,7 +89,7 @@ deploy/
 ├── install.bat                 ← double-click to run
 └── files/                      ← everything needed to deploy
     ├── notify-bubble.ts        plugin
-    ├── oc-notify.default.json  default config template
+    ├── oc-notify.default.jsonc  default config template
     └── OcNotify/               bubble app (exe + dll + deps)
 ```
 
@@ -108,9 +108,9 @@ deploy/
 |--------|-------------|
 | `files\notify-bubble.ts` | `%USERPROFILE%\.config\opencode\plugins\notify-bubble.ts` |
 | `files\OcNotify\*` | `%USERPROFILE%\.config\opencode\assets\OcNotify\` |
-| `files\oc-notify.default.json` | `%USERPROFILE%\.config\opencode\oc-notify.json` |
+| `files\oc-notify.default.jsonc` | `%USERPROFILE%\.config\opencode\oc-notify.jsonc` |
 
-> **Config protection**: if `oc-notify.json` already exists, the script **skips it** and keeps your existing config.
+> **Config protection**: if `oc-notify.jsonc` already exists, the script **skips it** and keeps your existing config.
 
 **Upgrade**: double-click `install.bat` again to overwrite plugin and app files, then restart opencode.
 
@@ -132,8 +132,8 @@ dotnet publish src\OcNotify\OcNotify.csproj -c Release -o $exe /p:DebugType=none
 Copy-Item src\plugin\notify-bubble.ts $plug -Force
 
 # 3. Config (first time only; never overwrite an existing one)
-if (-not (Test-Path "$cfg\oc-notify.json")) {
-  Copy-Item config\oc-notify.default.json "$cfg\oc-notify.json"
+if (-not (Test-Path "$cfg\oc-notify.jsonc")) {
+  Copy-Item config\oc-notify.default.jsonc "$cfg\oc-notify.jsonc"
 }
 ```
 
@@ -157,7 +157,7 @@ Get-Process OcNotify -ErrorAction SilentlyContinue | Stop-Process -Force
 $cfg = "$env:USERPROFILE\.config\opencode"
 Remove-Item "$cfg\plugins\notify-bubble.ts" -Force -ErrorAction SilentlyContinue
 Remove-Item "$cfg\assets\OcNotify" -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item "$cfg\oc-notify.json" -Force -ErrorAction SilentlyContinue   # also removes config; drop this line to keep it
+Remove-Item "$cfg\oc-notify.jsonc" -Force -ErrorAction SilentlyContinue   # also removes config; drop this line to keep it
 ```
 
 ---
@@ -189,7 +189,7 @@ Want popups even in the foreground? Set `behavior.onlyWhenInactive` to `false` �
 ### Config tuning example
 
 ```jsonc
-// %USERPROFILE%\.config\opencode\oc-notify.json — applies on save
+// %USERPROFILE%\.config\opencode\oc-notify.jsonc — applies on save
 {
   "style": {
     "position": "bottom-right",  // dock bottom-right
@@ -204,7 +204,7 @@ Want popups even in the foreground? Set `behavior.onlyWhenInactive` to `false` �
 }
 ```
 
-**Project-level config**: drop an `oc-notify.json` in a project root; write only the sections you want to override (`style` / `behavior` / `events`). It merges with global config at runtime and applies only to that project.
+**Project-level config**: drop an `oc-notify.jsonc` in a project root; write only the sections you want to override (`style` / `behavior` / `events`). It merges with global config at runtime and applies only to that project.
 
 Full fields: [Configuration Reference](#configuration-reference).
 
@@ -224,10 +224,10 @@ Full fields: [Configuration Reference](#configuration-reference).
 
 ## Configuration Reference
 
-**Global config**: `%USERPROFILE%\.config\opencode\oc-notify.json`
-**Project config**: `<project root>\oc-notify.json` (overrides global per section)
+**Global config**: `%USERPROFILE%\.config\opencode\oc-notify.jsonc`
+**Project config**: `<project root>\oc-notify.jsonc` (overrides global per section)
 
-Saving **hot-reloads immediately** — no process restarts.
+Saving **hot-reloads immediately** — no process restarts. The file is jsonc: `//` and `/* */` comments and trailing commas are allowed.
 
 ### Full example
 
@@ -296,7 +296,7 @@ Five booleans, one per notification type; filtered plugin-side — disabled even
 ```
 plugins\notify-bubble.ts      → auto-loaded at opencode startup (listens, spawns exe on demand)
 assets\OcNotify\OcNotify.exe  → the bubble app (single instance, idle-exits after ~60s)
-oc-notify.json                → global config (hot-reloads on save)
+oc-notify.jsonc               → global config (hot-reloads on save)
 ```
 
 ---
@@ -430,7 +430,7 @@ Format: `[ISO time] [INFO|ERROR] message`. Covers init/config snapshot, event ar
   "sessionID": "ses_xxxxxxxx",
   "sessionTitle": "My project",
   "timestamp": 1790000000000,
-  "configPath": "D:\\proj\\oc-notify.json"
+  "configPath": "D:\\proj\\oc-notify.jsonc"
 }
 ```
 
@@ -481,7 +481,7 @@ dotnet publish src\OcNotify\OcNotify.csproj -c Release -o deploy\files\OcNotify 
 
 # Sync plugin and config template into the deploy package
 Copy-Item src\plugin\notify-bubble.ts deploy\files\ -Force
-Copy-Item config\oc-notify.default.json deploy\files\ -Force
+Copy-Item config\oc-notify.default.jsonc deploy\files\ -Force
 ```
 
 ### Standard workflow after changes
@@ -537,10 +537,10 @@ oc-notify/
 │   ├── install.bat                   # one-click deploy script
 │   └── files/                        # distributable package
 │       ├── notify-bubble.ts
-│       ├── oc-notify.default.json
+│       ├── oc-notify.default.jsonc
 │       └── OcNotify/                 # exe + dll + deps
 ├── config/
-│   └── oc-notify.default.json        # default config template (source)
+│   └── oc-notify.default.jsonc     # default config template (source)
 ├── docs/
 │   └── Example.png                   # README screenshot (five bubble types)
 ├── scripts/

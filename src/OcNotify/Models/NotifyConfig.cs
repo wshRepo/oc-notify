@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace OcNotify.Models;
 
 /// <summary>
-/// 气泡通知整体配置，对应 oc-notify.json 根对象。
+/// 气泡通知整体配置，对应 oc-notify.jsonc 根对象。
 /// 分为样式、行为、事件开关三段，便于按需深合并与热更新。
 /// </summary>
 public sealed class NotifyConfig
