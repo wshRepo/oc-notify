@@ -99,7 +99,7 @@ deploy/
    - 下载页：<https://dotnet.microsoft.com/download/dotnet/8.0>
    - 选择 **".NET Desktop Runtime 8.0.x (x64)"**（不是 ASP.NET Runtime，也不是仅 Runtime）
 2. **双击 `deploy\install.bat`**
-3. 脚本自动完成：检测运行时 → 停止正在运行的 `OcNotify.exe` → 复制插件 / 程序 → 智能合并配置 → 自动启动新版 `OcNotify.exe`（若部署前正在运行）→ 打印部署报告
+3. 脚本自动完成：检测运行时 → 停止正在运行的 `OcNotify.exe` → 复制插件 / 程序 → 智能合并配置 → 打印部署报告
 4. **重启 opencode CLI**（插件仅在启动时加载）
 5. 按下方 [使用](#使用) 验证
 

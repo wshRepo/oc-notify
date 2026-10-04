@@ -99,7 +99,7 @@ deploy/
    - Download: <https://dotnet.microsoft.com/download/dotnet/8.0>
    - Pick **".NET Desktop Runtime 8.0.x (x64)"** (not ASP.NET Runtime, not plain Runtime)
 2. **Double-click `deploy\install.bat`**
-3. The script detects the runtime → stops any running `OcNotify.exe` → copies plugin / app → smart-merges the config → starts the new `OcNotify.exe` (if one was running) → prints a deployment report
+3. The script detects the runtime → stops any running `OcNotify.exe` → copies plugin / app → smart-merges the config → prints a deployment report
 4. **Restart the opencode CLI** (plugins load only at startup)
 5. Verify with [Usage](#usage) below
 
