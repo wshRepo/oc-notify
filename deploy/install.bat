@@ -25,7 +25,7 @@ set /a OK=0
 set /a FAIL=0
 set /a SKIP=0
 
-set "VERSION=v1.0.1"
+set "VERSION=v1.1.2"
 
 echo ============================================================
 echo    oc-notify 一键部署  %VERSION%
