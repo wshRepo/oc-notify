@@ -421,8 +421,15 @@ export const NotifyBubblePlugin: Plugin = async (input: PluginInput): Promise<Ho
   await ensureOcNotifyRunning();
 
   // --- 反误报状态 ---
-  /** sessionID → 最近一次 busy 时间（短任务过滤用） */
+  /** sessionID → 本轮首次 busy 时间（短任务过滤用） */
   const busyAt = new Map<string, number>();
+  /**
+   * 当前处于 busy 态的 sessionID 集合（busy 时加入，idle 时移除）。
+   * GC 只清理不在此集合内的 busyAt 条目——否则跑过 60s 的长任务会被
+   * 按时间误判为陈旧数据删掉，收尾前的二次 busy 又被当成"首次 busy"
+   * 重新记时间，导致 idle 时 elapsed 近乎 0、短任务过滤误杀（已踩坑）。
+   */
+  const inflight = new Set<string>();
   /** sessionID → 最近一次 error 时间（error 后 2s 内的 idle 抑制） */
   const errorAt = new Map<string, number>();
   /** sessionID → 权限消抖定时器 */
@@ -496,6 +503,8 @@ export const NotifyBubblePlugin: Plugin = async (input: PluginInput): Promise<Ho
    */
   async function onIdle(sessionID: string): Promise<void> {
     try {
+      // 先摘掉 busy 态标记（放在所有 return 之前，保证每条退出路径都清理）
+      inflight.delete(sessionID);
       const errTs = errorAt.get(sessionID);
       if (errTs !== undefined && Date.now() - errTs < 2000) {
         debugLog(`onIdle skip: recent session.error (suppress duplicate) sid=${sessionID}`);
@@ -627,6 +636,9 @@ export const NotifyBubblePlugin: Plugin = async (input: PluginInput): Promise<Ho
       case "session.status": {
         const st = (props as { status?: { type?: string } }).status;
         if (st?.type === "busy" && props.sessionID) {
+          // 标记 busy 态：GC 见到仍在 inflight 的 sid 不会清理其 busyAt，
+          // 保证跑过 60s 的长任务不会因 GC 丢掉首次 busy 时间戳（已踩坑）
+          inflight.add(props.sessionID);
           // 只记录首次 busy：临近 idle 可能再发一次 busy，
           // 若覆盖会把 elapsed 压到几毫秒，误判为短任务（已踩坑）
           if (!busyAt.has(props.sessionID)) {
@@ -672,8 +684,15 @@ export const NotifyBubblePlugin: Plugin = async (input: PluginInput): Promise<Ho
     () => {
       const now = Date.now();
       for (const [k, t] of errorAt) if (now - t > 60_000) errorAt.delete(k);
-      for (const [k, t] of busyAt) if (now - t > 60_000) busyAt.delete(k);
+      // busyAt 只清"已不在 busy 态"的条目：仍在 inflight 的说明本轮还在跑，
+      // 哪怕超过 60s 也不能删，否则长任务收尾会被误判成短任务而漏弹（已踩坑）。
+      // 能留到现在说明 idle 事件丢了，属于脏数据，清掉是对的。
+      for (const [k, t] of busyAt) {
+        if (!inflight.has(k) && now - t > 60_000) busyAt.delete(k);
+      }
       if (sessionCache.size > 500) sessionCache.clear();
+      // busy 态标记兜底：进程生命周期有限，集合不会涨；异常情况下清空避免泄漏
+      if (inflight.size > 500) inflight.clear();
     },
     60_000,
   );
@@ -701,6 +720,7 @@ export const NotifyBubblePlugin: Plugin = async (input: PluginInput): Promise<Ho
       permTimers.clear();
       errorAt.clear();
       busyAt.clear();
+      inflight.clear();
       sessionCache.clear();
     },
   };
