@@ -63,6 +63,7 @@ Labels follow `style.language`: Chinese by default (对话完成 / 权限请求 
 - **Foreground-only suppression** (`onlyWhenInactive`, default on): no popups while opencode/terminal is focused (tabs within one WT window are not distinguished — see [Known Limitations](#known-limitations))
 - **Anti-noise**: no double popup when idle follows an error within 2s; busy→idle under 2s treated as a short task; 300ms debounce on permission requests
 - **Automatic lifecycle**: first CLI spawns `OcNotify.exe`; exits ~60s after all CLIs close; single-instance Mutex
+- **Sleep prevention** (`preventSleep`, default off): suppresses "sleep after inactivity" while any opencode session is busy; restores automatically once idle
 - **Hot-reload config**: edit JSON and it applies immediately — no restarts
 
 ---
@@ -203,12 +204,13 @@ Want popups even in the foreground? Set `behavior.onlyWhenInactive` to `false` �
   },
   "behavior": {
     "durationMs": 8000,          // stay 8 seconds
-    "onlyWhenInactive": true
+    "onlyWhenInactive": true,
+    "preventSleep": true         // don't let the machine sleep while you work (strongly recommended for long builds / installs)
   }
 }
 ```
 
-**Project-level config**: drop an `oc-notify.jsonc` in a project root; write only the sections you want to override (`style` / `behavior` / `events`). It merges with global config at runtime and applies only to that project.
+**Project-level config**: drop an `oc-notify.jsonc` in a project root; write only the fields you want to override (e.g. just `{"behavior":{"preventSleep":true}}`). It merges with global config **field by field** at runtime and applies only to that project.
 
 Full fields: [Configuration Reference](#configuration-reference).
 
@@ -222,6 +224,10 @@ Full fields: [Configuration Reference](#configuration-reference).
 .\scripts\Send-StackTest.ps1 -Count 7
 
 # type: sessionIdle | permissionAsk | questionAsk | sessionError | subagentDone
+
+# Sleep prevention: simulate "session busy", then run `powercfg /requests` as admin
+.\scripts\Send-PowerTest.ps1 -Hold
+.\scripts\Send-PowerTest.ps1          # restore sleep
 ```
 
 ---
@@ -229,7 +235,7 @@ Full fields: [Configuration Reference](#configuration-reference).
 ## Configuration Reference
 
 **Global config**: `%USERPROFILE%\.config\opencode\oc-notify.jsonc`
-**Project config**: `<project root>\oc-notify.jsonc` (overrides global per section)
+**Project config**: `<project root>\oc-notify.jsonc` (overrides global field by field)
 
 Saving **hot-reloads immediately** — no process restarts. The file is jsonc: `//` and `/* */` comments and trailing commas are allowed.
 
@@ -254,7 +260,8 @@ Saving **hot-reloads immediately** — no process restarts. The file is jsonc: `
     "onlyWhenInactive": true,    // only pop when opencode is not focused (recommended)
     "debug": false,              // debug logging
     "idleCheckIntervalMs": 30000,// idle check interval (ms)
-    "idleRetry": 2               // exit after N consecutive checks with no opencode
+    "idleRetry": 2,              // exit after N consecutive checks with no opencode
+    "preventSleep": false        // block Windows from auto-sleeping (default off)
   },
   "events": {
     "sessionIdle": true,         // reply finished
@@ -292,10 +299,52 @@ Saving **hot-reloads immediately** — no process restarts. The file is jsonc: `
 | `debug` | bool | `false` | Debug logging |
 | `idleCheckIntervalMs` | int | `30000` | exe idle check interval |
 | `idleRetry` | int | `2` | Consecutive misses before exit; total grace ≈ interval × retry (~60s default) |
+| `preventSleep` | bool | `false` | Block system auto-sleep while any session is busy, restore when idle (see [Sleep prevention](#sleep-prevention-preventsleep)) |
 
 #### events
 
 Five booleans, one per notification type; filtered plugin-side — disabled events never reach the pipe.
+
+### Sleep prevention `preventSleep`
+
+Windows' "sleep after 10 minutes of inactivity" regularly puts a machine to sleep while a long build, dependency install or model training is still running. Turn this on and it won't:
+
+```jsonc
+// %USERPROFILE%\.config\opencode\oc-notify.jsonc
+{ "behavior": { "preventSleep": true } }
+```
+
+| Moment | Behavior |
+|--------|----------|
+| Any session goes busy (AI starts working) | Requests a system power request — **blocks automatic sleep/hibernate** |
+| All sessions go idle (AI finished) | Releases it; the machine sleeps normally per your existing "sleep after inactivity" setting |
+| You set `preventSleep` back to `false` while running | Released within 1 second — no event needed |
+
+**What it blocks, what it doesn't**
+
+- ✅ Blocks: automatic sleep/hibernate from inactivity timers — exactly the thing you want gone
+- ❌ Doesn't block: display power-off (no `ES_DISPLAY_REQUIRED` is requested; the screen still turns off per system settings)
+- ❌ Doesn't block: manual sleep/shutdown (`Win+C` → Sleep, the power button) — **deliberate**, the user always keeps final control
+
+**How it works**: a dedicated thread inside the exe calls `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)` to reset the system idle timer, and `SetThreadExecutionState(ES_CONTINUOUS)` to clear it. `powercfg` power plans are never touched, so global settings stay pristine. Verify with:
+
+```powershell
+# elevated PowerShell
+powercfg /requests   # should list [PROCESS] OcNotify.exe while a session is busy
+```
+
+**Four layers guaranteeing it can never get stuck awake**
+
+| Layer | Trigger | Upper bound |
+|-------|---------|-------------|
+| exe lease | No heartbeat from the plugin for 120s | **120s** (hard guarantee, independent of any process state) |
+| Plugin heartbeat | Idempotent re-send every 60s | 60s |
+| exe idle exit | No opencode process ×2 | ~60s |
+| Process death | opencode / exe exits | Immediate (the kernel reclaims all power requests held by that process) |
+
+**Multiple opencode instances**: the request is held while *any* session is busy, and released only when *all* sessions are idle.
+
+> This toggle follows opencode's **session busy/idle state** only — it does not track whether you're typing. If you want "never sleep while opencode is open", weigh that carefully: the machine would then never sleep.
 
 ### File roles after deploy
 
@@ -318,6 +367,7 @@ oc-notify.jsonc               → global config (hot-reloads on save)
 | Wrong position | Verify `style.position`; check work area on multi-monitor; send a new notification after config hot-reload |
 | exe doesn't exit | Any opencode process left (including unclosed CLIs)? Lower `idleCheckIntervalMs`/`idleRetry` to verify |
 | exe doesn't auto-start | Log `ensureOcNotify: spawned` / `exe missing` / `pipe already up`; confirm `assets\OcNotify\OcNotify.exe` exists |
+| Sleep prevention not working | ① Confirm `preventSleep: true` is saved ② Run `powercfg /requests` as admin and look for `OcNotify.exe` ③ Enable `debug` and check `%TEMP%\oc-notify-error.log` for `PowerGuard: sleep blocked/released` |
 | Installer says runtime missing | Install **.NET Desktop Runtime 8.0.x x64**, re-run `install.bat` |
 | Plugin changes not applied | Plugins load at startup only → **restart opencode** |
 | Build errors | Run `dotnet build -warnaserror` and read the first error; confirm .NET 8 SDK |
@@ -345,7 +395,7 @@ With `"behavior": { "debug": true }`:
 | Side | Log path |
 |------|----------|
 | Plugin | `%TEMP%\oc-notify-plugin.log` |
-| exe errors | `%TEMP%\oc-notify-error.log` |
+| exe errors | `%TEMP%\oc-notify-error.log` (`PowerGuard` blocked/released entries land here too) |
 
 Format: `[ISO time] [INFO|ERROR] message`. Covers init/config snapshot, event arrival, short-task & error suppression, foreground-block reasons, pipe I/O, permission debounce, and all exceptions. `debug` hot-reloads.
 
@@ -370,10 +420,12 @@ Format: `[ISO time] [INFO|ERROR] message`. Covers init/config snapshot, event ar
 │  ├ PipeServer    receive    │
 │  ├ ConfigService hot reload │
 │  ├ NotificationManager queue│
+│  ├ PowerGuard    power req  │  consumes type=power control messages
 │  └ MainWindow   transparent │
 │       └ NotificationCard×N  │  cards + animations
 └─────────────────────────────┘
-              ▼  bubbles in screen corners
+          ├─→ bubbles in screen corners
+          └─→ SetThreadExecutionState (block / restore auto-sleep)
 ```
 
 **Process model**:
@@ -403,6 +455,16 @@ Format: `[ISO time] [INFO|ERROR] message`. Covers init/config snapshot, event ar
 
 - Resolution stops at the **window** level — tabs sharing one WT window cannot be told apart → see [Known Limitations](#known-limitations)
 
+### Sleep prevention — division of labour
+
+- **Decided plugin-side**: the desired state is computed **live from the `inflight` set** on every call (`busy → add`, `idle → delete`). No second counter exists, so it can never drift from the busy/idle state
+- **Call sites cover exactly every mutation of `inflight`**: the busy branch, `onIdle` right after `delete` and *before* every early `return`, the 60s `gcTimer` heartbeat, and `dispose`
+- **The heartbeat is an idempotent re-send**: when the desired state is unchanged the exe doesn't call the Win32 API at all, so a re-send can **never** release a still-running long task
+- **Executed exe-side**: one dedicated thread calls `SetThreadExecutionState` (it's a thread-level API — the acquiring thread and the clearing thread must be the same one)
+- **Independent exe-side veto**: even if the plugin still requests it, flipping the config to `false` releases immediately (driven by `ConfigService.ConfigChanged`)
+
+Config and usage: [Sleep prevention `preventSleep`](#sleep-prevention-preventsleep).
+
 ### Single instance & idle exit
 
 - **Single instance**: `Mutex("Local\OcNotify.SingleInstance")`; second instance exits immediately
@@ -421,8 +483,8 @@ Format: `[ISO time] [INFO|ERROR] message`. Covers init/config snapshot, event ar
 | Event | Handling |
 |-------|----------|
 | `session.created` / `session.updated` | cache title / parentID |
-| `session.status` | record **first** busy timestamp (never overwrite) |
-| `session.idle` | error suppression → short-task filter → fetch title → emit |
+| `session.status` | record **first** busy timestamp (never overwrite) + `syncPower()` to request sleep prevention |
+| `session.idle` | `syncPower()` to release sleep prevention → error suppression → short-task filter → fetch title → emit |
 | `session.error` | record timestamp + emit immediately |
 | `permission.updated` / `permission.asked` | emit after 300ms debounce |
 | `question.asked` | fetch title → emit |
@@ -445,11 +507,18 @@ Format: `[ISO time] [INFO|ERROR] message`. Covers init/config snapshot, event ar
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `type` | ✅ | one of the five types (see Features) |
-| `sessionID` | ✅ | opencode session ID |
-| `sessionTitle` | ✅ | bubble title |
+| `type` | ✅ | one of the five notification types (see Features), or the `power` control message |
+| `sessionID` | ✅ | opencode session ID (may be omitted for `power`) |
+| `sessionTitle` | ✅ | bubble title (may be omitted for `power`) |
 | `timestamp` | ✅ | Unix milliseconds |
 | `configPath` | ❌ | project-level config path; exe merges with global |
+| `hold` | ❌ | only meaningful for `type: "power"`: `true` = request blocking auto-sleep, `false` = restore |
+
+**Control message** (`type: "power"`): produces no bubble; consumed by `PowerGuard` inside the exe, which only cares about `hold` and `configPath`.
+
+```json
+{ "type": "power", "hold": true, "timestamp": 1790000000000 }
+```
 
 **PowerShell example**:
 
@@ -519,6 +588,9 @@ Start-Process "$env:USERPROFILE\.config\opencode\assets\OcNotify\OcNotify.exe"
 - [ ] Changing `theme`/`position`/`durationMs`/`language` takes effect on the next notification
 - [ ] Two CLIs open → closing one doesn't kill the exe; closing all → exits after ~60s
 - [ ] Launching the exe twice → only one instance survives
+- [ ] `preventSleep: true` + busy session → `powercfg /requests` lists `[PROCESS] OcNotify.exe`
+- [ ] After idle the entry disappears within 120s; flipping back to `false` → gone within 1s
+- [ ] exe CPU stays low while sleep prevention is on (the PowerGuard thread polls every 5s — it must never spin)
 
 ### Key design conventions
 
@@ -528,6 +600,9 @@ Start-Process "$env:USERPROFILE\.config\opencode\assets\OcNotify\OcNotify.exe"
 4. **Plugin**: no `bun:ffi`, no `node:net` for the pipe; focus detection and spawning go through PowerShell / `fs.openSync`
 5. **Eviction**: `Items.RemoveAt(0)` first to free a slot, then trigger the animation (otherwise infinite `while` loop)
 6. **Busy timestamp**: record only the first; repeated busy near idle must not overwrite
+7. **Config merging**: must happen field by field at the `JsonNode` level. Once deserialized into a POCO you can no longer tell "field absent" from "field happens to equal its default", so any "use whichever section project provided" approach silently resets whole sections to defaults
+8. **Wake primitives**: use a counting `SemaphoreSlim` for cross-thread wakeups — **not** `ManualResetEventSlim`. It's latching: after `Set()` without a `Reset()` the waiter spins at 100% CPU
+9. **Native calls must be idempotent**: skip the Win32 call when the state hasn't changed. A repeated heartbeat that actually calls every time causes needless state churn
 
 ### Code style
 
@@ -555,17 +630,18 @@ oc-notify/
 │   └── Example.png                   # README screenshot (five bubble types)
 ├── scripts/
 │   ├── Send-TestNotification.ps1     # single pipe test
-│   └── Send-StackTest.ps1            # burst test (stacking/eviction)
+│   ├── Send-StackTest.ps1            # burst test (stacking/eviction)
+│   └── Send-PowerTest.ps1            # sleep-prevention control test (pair with powercfg /requests)
 ├── src/
 │   ├── OcNotify/                     # C# WPF bubble app
 │   │   ├── OcNotify.csproj           # net8.0-windows / UseWPF
-│   │   ├── App.xaml(.cs)             # single instance, wiring, idle exit
+│   │   ├── App.xaml(.cs)             # single instance, wiring, idle exit, pipe routing
 │   │   ├── MainWindow.xaml(.cs)      # transparent host, corner anchors, DPI
 │   │   ├── Controls/
 │   │   │   └── NotificationCard.xaml(.cs)  # card style + animations
 │   │   ├── Models/                   # NotifyConfig / NotifyMessage / NotificationItem
-│   │   ├── Services/                 # PipeServer / ConfigService / NotificationManager / DwmHelper
-│   │   └── Helpers/                  # CategoryInfo (labels/colors, bilingual + dual theme)
+│   │   ├── Services/                 # PipeServer / ConfigService / NotificationManager / PowerGuard / DwmHelper
+│   │   └── Helpers/                  # CategoryInfo (labels/colors, bilingual + dual theme) / DiagLog (exe-side log)
 │   └── plugin/
 │       └── notify-bubble.ts          # opencode plugin
 └── .gitignore
@@ -616,6 +692,21 @@ Each CLI runs its own plugin process, and the plugin can tell exactly which tab 
 ### Ancestor PIDs are collected only once at plugin startup
 
 `collectAncestorPids` runs during plugin init only. If the terminal window hosting opencode is rebuilt (WT closed and reopened, terminal host restart, …), the PID set goes stale and detection degrades to "only opencode's own PID counts as foreground", which **allows** in most cases — i.e. noisier than expected rather than quieter. Restarting opencode restores it.
+
+### Sleep prevention follows session busy/idle, not your keystrokes
+
+`preventSleep` is driven purely by opencode's `session.status` (busy / idle) and **does not observe Windows-level user input**. Hence these boundaries:
+
+| Scenario | Result |
+|----------|--------|
+| AI is running a long build and you're watching it | ✅ stays awake (the target case) |
+| AI finished, you walk to the kitchen, machine sleeps after 10 min | ✅ sleeps normally (as intended) |
+| AI is idle but you're running a long `!npm run build` from the TUI that **doesn't count as session busy** | ❌ not held — the machine still sleeps per system settings |
+| Laptop on Modern Standby with a long session open | ⚠️ drains the battery fast (won't sleep even with the lid closed) |
+
+The third row is the only real gap: whether `!`-prefixed commands advance the session state depends on your opencode version. If your long work is mostly driven by `!` commands, lengthen the system sleep timeout instead, or keep the machine awake manually during that window.
+
+Also note `ES_SYSTEM_REQUIRED` only blocks **automatic** sleep. If the hidden power setting `AllowSystemRequired` (`powercfg` alias `SYSTEMREQUIRED`) is set to 0, application requests are ignored by the system; its default is 1, so normal machines are unaffected.
 
 ---
 

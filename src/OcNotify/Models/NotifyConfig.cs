@@ -19,28 +19,6 @@ public sealed class NotifyConfig
     /// <summary>各提醒事件启用开关（P4 插件侧过滤用，exe 仅解析存档）。</summary>
     [JsonPropertyName("events")]
     public EventsConfig Events { get; set; } = new();
-
-    /// <summary>
-    /// 深合并：project 覆盖 global 的同名字段（仅覆盖非默认的显式值场景简化为逐段整体替换）。
-    /// 这里采用简单策略：哪段 project 提供了就用哪段，否则沿用 global。
-    /// </summary>
-    /// <param name="global">全局配置（底）。</param>
-    /// <param name="project">项目级配置（顶），可为 null。</param>
-    /// <returns>合并后的新实例。</returns>
-    public static NotifyConfig Merge(NotifyConfig global, NotifyConfig? project)
-    {
-        if (project is null)
-        {
-            return global;
-        }
-
-        return new NotifyConfig
-        {
-            Style = project.Style ?? global.Style,
-            Behavior = project.Behavior ?? global.Behavior,
-            Events = project.Events ?? global.Events,
-        };
-    }
 }
 
 /// <summary>样式配置。</summary>
@@ -135,6 +113,17 @@ public sealed class BehaviorConfig
     /// </summary>
     [JsonPropertyName("idleRetry")]
     public int IdleRetry { get; set; } = 2;
+
+    /// <summary>
+    /// 阻止 Windows 自动休眠（默认关）。
+    /// 开启后：opencode 存在忙碌会话时向系统申请电源请求，屏蔽"无操作 N 分钟后睡眠"；
+    /// 会话空闲后自动恢复休眠。屏幕熄灭不受影响（未申请 ES_DISPLAY_REQUIRED），
+    /// 手动休眠/关机也不受影响。
+    /// 决策在插件侧（它才知道会话忙不忙），本字段同时作为 exe 侧的独立否决：
+    /// 此处改为 false 会立即释放请求，不必等插件心跳。
+    /// </summary>
+    [JsonPropertyName("preventSleep")]
+    public bool PreventSleep { get; set; }
 }
 
 /// <summary>各提醒事件启用开关。</summary>

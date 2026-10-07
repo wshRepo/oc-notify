@@ -11,6 +11,9 @@ import { homedir, tmpdir } from "node:os";
  * 1. 监听 5 类事件（对话完成/权限/提问/错误/子代理完成），按配置 events 开关过滤
  * 2. 非前台检测（behavior.onlyWhenInactive，默认开）：opencode/终端处于前台时不弹窗
  * 3. 经命名管道 \\.\pipe\oc-notify 发送一行 JSON 给 OcNotify.exe
+ * 4. 阻止系统休眠（behavior.preventSleep，默认关）：会话忙碌期间下发 type=power 控制消息，
+ *    由 exe 的 PowerGuard 申请 Windows 电源请求；会话空闲后自动释放。
+ *    本插件只负责"意图"，原生电源调用与租约兜底全在 exe 侧。
  *
  * 线程模型（避免阻塞 opencode 主流程）：
  * - event 钩子同步进入后立即调度后台工作并返回，不做长 await
@@ -35,6 +38,12 @@ interface BehaviorCfg {
   onlyWhenInactive: boolean;
   /** 调试日志开关：开启后 debugLog 写入 %TEMP%\oc-notify-plugin.log */
   debug: boolean;
+  /**
+   * 阻止 Windows 自动休眠（默认关）。
+   * 开启后：存在忙碌会话时向 exe 申请电源请求，屏蔽"无操作 N 分钟后睡眠"；
+   * 全部会话空闲后自动恢复。屏幕熄灭与手动休眠不受影响。
+   */
+  preventSleep: boolean;
 }
 
 interface PluginCfg {
@@ -52,7 +61,11 @@ const DEFAULT_EVENTS: EventsCfg = {
   subagentDone: true,
 };
 
-const DEFAULT_BEHAVIOR: BehaviorCfg = { onlyWhenInactive: true, debug: false };
+const DEFAULT_BEHAVIOR: BehaviorCfg = {
+  onlyWhenInactive: true,
+  debug: false,
+  preventSleep: false,
+};
 
 /**
  * 剥离 JSONC 的注释（// 与 /* *\/）并移除尾逗号，得到 JSON.parse 可接受的纯 JSON。
@@ -412,6 +425,7 @@ export const NotifyBubblePlugin: Plugin = async (input: PluginInput): Promise<Ho
   let cfg = loadConfig(directory);
   debugLog(
     `config loaded: onlyWhenInactive=${cfg.behavior.onlyWhenInactive} debug=${cfg.behavior.debug} ` +
+      `preventSleep=${cfg.behavior.preventSleep} ` +
       `events=${JSON.stringify(cfg.events)} projectCfg=${cfg.projectConfigPath ?? "(none)"}`,
   );
   ancestorPids = await collectAncestorPids();
@@ -436,6 +450,12 @@ export const NotifyBubblePlugin: Plugin = async (input: PluginInput): Promise<Ho
   const permTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** 已 dispose */
   let disposed = false;
+  /**
+   * 上一次已下发给 exe 的「阻止休眠」期望值；null=从未下发过。
+   * 只用于去重与"开关被关时补发一次释放"，不是状态源——
+   * 真正的状态源是 inflight，见 syncPower 的注释。
+   */
+  let powerHold: boolean | null = null;
 
   /** 每次发消息前重读配置（文件很小，失败保留旧配置）。 */
   function refreshConfig(): void {
@@ -444,6 +464,55 @@ export const NotifyBubblePlugin: Plugin = async (input: PluginInput): Promise<Ho
     } catch {
       /* keep old */
     }
+  }
+
+  /**
+   * 下发一条电源控制消息（type=power）。
+   * 不走 emit()：这不是提醒，没有气泡，也不该被 events 开关或 onlyWhenInactive 过滤。
+   */
+  function writePower(hold: boolean): void {
+    if (disposed) return;
+    debugLog(`writePower → type=power hold=${hold}`);
+    sendPipe(
+      JSON.stringify({
+        type: "power",
+        hold,
+        timestamp: Date.now(),
+        configPath: cfg.projectConfigPath,
+      }),
+    );
+  }
+
+  /**
+   * 把「是否阻止系统休眠」同步给 exe。
+   *
+   * 期望值**每次都从 inflight 现场求值**，而不是从 powerHold 递推——
+   * 这是本函数最关键的设计。心跳重发时看到的长任务仍在 inflight 里，
+   * 求出来的必然还是 hold=true，绝不会因为"重发"而把还在跑的任务误释放。
+   *
+   * 调用点正好覆盖 inflight 的全部变更处（外加 gcTimer 心跳）：
+   * - session.status=busy：inflight.add 之后 → 请求阻止
+   * - session.idle：inflight.delete 之后、所有提前 return 之前 → 请求释放
+   * - gcTimer tick：force=true 重发，用于修复丢失的消息（幂等）
+   * - dispose：显式释放一次
+   *
+   * @param force true=忽略去重强制重发（心跳用）
+   */
+  function syncPower(force = false): void {
+    refreshConfig();
+    if (cfg.behavior.preventSleep !== true) {
+      // 开关关闭：只需在"曾经 hold 过"时补发一次释放，之后彻底静默
+      if (powerHold === true) {
+        powerHold = false;
+        writePower(false);
+      }
+      return;
+    }
+
+    const want = inflight.size > 0;
+    if (want === powerHold && !force) return;
+    powerHold = want;
+    writePower(want);
   }
 
   /**
@@ -505,6 +574,8 @@ export const NotifyBubblePlugin: Plugin = async (input: PluginInput): Promise<Ho
     try {
       // 先摘掉 busy 态标记（放在所有 return 之前，保证每条退出路径都清理）
       inflight.delete(sessionID);
+      // 同步解除休眠阻止：同样必须早于所有 return，否则短路分支会漏掉释放
+      syncPower();
       const errTs = errorAt.get(sessionID);
       if (errTs !== undefined && Date.now() - errTs < 2000) {
         debugLog(`onIdle skip: recent session.error (suppress duplicate) sid=${sessionID}`);
@@ -644,6 +715,8 @@ export const NotifyBubblePlugin: Plugin = async (input: PluginInput): Promise<Ho
           if (!busyAt.has(props.sessionID)) {
             busyAt.set(props.sessionID, Date.now());
           }
+          // 请求阻止系统休眠（多会话时任一会话忙碌即保持）
+          syncPower();
         }
         break;
       }
@@ -693,6 +766,10 @@ export const NotifyBubblePlugin: Plugin = async (input: PluginInput): Promise<Ho
       if (sessionCache.size > 500) sessionCache.clear();
       // busy 态标记兜底：进程生命周期有限，集合不会涨；异常情况下清空避免泄漏
       if (inflight.size > 500) inflight.clear();
+      // 电源心跳（force=true 忽略去重）：修复管道写入失败丢失的消息。
+      // 丢失 hold 会让长任务中途被系统休眠，丢失 release 会让机器空耗一晚上，
+      // 两个方向都靠这次幂等重发兜底；期望值现场从 inflight 求值，不会误释放长任务。
+      syncPower(true);
     },
     60_000,
   );
@@ -715,6 +792,15 @@ export const NotifyBubblePlugin: Plugin = async (input: PluginInput): Promise<Ho
     dispose: async () => {
       debugLog("plugin dispose");
       disposed = true;
+      // 退出前显式释放一次休眠阻止（正常路径的显式复位）。
+      // 不能走 syncPower：它在 disposed 后不再发消息，而这里必须发出最后一条。
+      // 只在确实 hold 过时才发：开关从未开启的用户不该每次退出都白写一条管道消息。
+      // 若此前那条 release 已丢失，也不用在这里补——exe 侧 120s 租约会兜住。
+      if (powerHold === true) {
+        powerHold = false;
+        debugLog("dispose: releasing sleep hold");
+        sendPipe(JSON.stringify({ type: "power", hold: false, timestamp: Date.now() }));
+      }
       clearInterval(gcTimer);
       for (const t of permTimers.values()) clearTimeout(t);
       permTimers.clear();

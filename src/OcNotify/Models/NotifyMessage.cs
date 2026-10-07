@@ -31,4 +31,13 @@ public sealed class NotifyMessage
     [JsonPropertyName("configPath")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ConfigPath { get; set; }
+
+    /// <summary>
+    /// 电源控制信号：true=请求阻止系统自动休眠，false=请求恢复休眠。
+    /// 仅 PowerGuard 关心的 type=power 消息有意义，其余 type 一律忽略。
+    /// 刻意不进 NotificationManager：这是一条控制指令而非提醒，不该产生气泡。
+    /// </summary>
+    [JsonPropertyName("hold")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Hold { get; set; }
 }

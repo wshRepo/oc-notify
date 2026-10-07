@@ -1,5 +1,7 @@
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using OcNotify.Helpers;
 using OcNotify.Models;
 
 namespace OcNotify.Services;
@@ -19,6 +21,13 @@ public sealed class ConfigService : IDisposable
         ReadCommentHandling = JsonCommentHandling.Skip,
         AllowTrailingCommas = true,
         WriteIndented = true,
+    };
+
+    /// <summary>JSON 解析选项：与 <see cref="JsonOptions"/> 保持同一套宽松语义。</summary>
+    private static readonly JsonDocumentOptions ParseOptions = new()
+    {
+        CommentHandling = JsonCommentHandling.Skip,
+        AllowTrailingCommas = true,
     };
 
     /// <summary>全局配置文件绝对路径（~/.config/opencode/oc-notify.jsonc）。</summary>
@@ -115,23 +124,80 @@ public sealed class ConfigService : IDisposable
     /// <returns>合并配置。</returns>
     private NotifyConfig LoadMerged(string? projectPath)
     {
-        var global = ReadConfigFile(GlobalConfigPath) ?? new NotifyConfig();
-        if (string.IsNullOrWhiteSpace(projectPath))
+        var global = ReadConfigObject(GlobalConfigPath) ?? new JsonObject();
+        if (!string.IsNullOrWhiteSpace(projectPath))
+        {
+            var project = ReadConfigObject(projectPath);
+            if (project is not null)
+            {
+                global = MergeObjects(global, project);
+            }
+        }
+
+        try
+        {
+            return global.Deserialize<NotifyConfig>(JsonOptions) ?? new NotifyConfig();
+        }
+        catch (JsonException ex)
+        {
+            // 合并后的 JSON 结构合法但类型不匹配（如 opacity 写成字符串）时兜底默认值
+            DiagLog.Write($"[ERROR] ConfigService: deserialize failed, fallback to defaults: {ex.Message}");
+            return new NotifyConfig();
+        }
+    }
+
+    /// <summary>
+    /// 逐字段深合并：project 的每个字段覆盖 global 的同名字段，未提供的字段保留 global 值。
+    ///
+    /// 为什么必须在 JsonNode 层做而不是反序列化成 POCO 再拼：
+    /// System.Text.Json 会给缺失字段填 C# 默认值，POCO 层面无法区分
+    /// "字段缺省"与"字段恰好等于默认值"，于是任何"哪段 project 提供了就用哪段"的写法
+    /// 都会把整段打回默认值——项目级只写 {theme:"dark"} 就会连 opacity 一起丢掉。
+    /// 现在改为按原始 JSON 逐字段合并，与插件侧 pick() 的语义完全一致。
+    /// </summary>
+    /// <param name="global">全局配置（底，不被修改）。</param>
+    /// <param name="project">项目级配置（顶，可为 null）。</param>
+    /// <returns>合并后的新对象。</returns>
+    private static JsonObject MergeObjects(JsonObject global, JsonObject? project)
+    {
+        if (project is null)
         {
             return global;
         }
 
-        var project = ReadConfigFile(projectPath);
-        return NotifyConfig.Merge(global, project);
+        var result = (JsonObject)global.DeepClone();
+        foreach (var field in project)
+        {
+            // 显式 null 视为"未提供"：若照单覆盖会把 style/behavior 整段打成 null，
+            // 下游访问 Style.Language 之类立刻 NRE。保留 global 值更安全。
+            if (field.Value is null)
+            {
+                continue;
+            }
+
+            // 两侧都是对象 → 递归逐字段（style/behavior/events 三段就是这么合的）
+            if (result.TryGetPropertyValue(field.Key, out var current) &&
+                current is JsonObject currentObj &&
+                field.Value is JsonObject overrideObj)
+            {
+                result[field.Key] = MergeObjects(currentObj, overrideObj);
+                continue;
+            }
+
+            // 标量/数组，或 global 侧不存在该键 → 直接覆盖
+            result[field.Key] = field.Value.DeepClone();
+        }
+
+        return result;
     }
 
     /// <summary>
-    /// 读取单个 JSON 配置文件；带 3 次重试（应对杀软占用/网络盘抖动）。
+    /// 读取单个 JSONC 配置文件为原始 JSON 对象；带 3 次重试（应对杀软占用/网络盘抖动）。
     /// 任何失败返回 null，由调用方决定回退策略。
     /// </summary>
     /// <param name="path">文件绝对路径。</param>
-    /// <returns>配置对象；不存在/失败返回 null。</returns>
-    private static NotifyConfig? ReadConfigFile(string path)
+    /// <returns>JSON 对象；不存在/失败返回 null。</returns>
+    private static JsonObject? ReadConfigObject(string path)
     {
         const int maxRetry = 3;
         for (var attempt = 1; attempt <= maxRetry; attempt++)
@@ -144,7 +210,7 @@ public sealed class ConfigService : IDisposable
                 }
 
                 var json = File.ReadAllText(path);
-                return JsonSerializer.Deserialize<NotifyConfig>(json, JsonOptions) ?? new NotifyConfig();
+                return JsonNode.Parse(json, documentOptions: ParseOptions) as JsonObject;
             }
             catch (JsonException)
             {

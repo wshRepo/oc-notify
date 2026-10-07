@@ -18,7 +18,8 @@
     "onlyWhenInactive": true,    // 仅 opencode 非前台时弹窗（推荐保持 true）
     "debug": false,              // 调试日志开关（开启后写入 %TEMP%\oc-notify-plugin.log）
     "idleCheckIntervalMs": 30000,// 空闲检测间隔（毫秒）
-    "idleRetry": 2               // 连续 N 次未发现 opencode 才退出
+    "idleRetry": 2,              // 连续 N 次未发现 opencode 才退出
+    "preventSleep": false        // 阻止 Windows 自动休眠（默认关）：开启后 opencode 有会话忙碌时屏蔽"无操作后自动睡眠"，会话空闲后自动恢复；屏幕熄灭与手动休眠不受影响
   },
   "events": {
     "sessionIdle": true,         // 对话完成

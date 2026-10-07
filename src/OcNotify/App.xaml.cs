@@ -1,7 +1,7 @@
 ﻿using System.Diagnostics;
-using System.IO;
 using System.Windows;
 using System.Windows.Threading;
+using OcNotify.Helpers;
 using OcNotify.Models;
 using OcNotify.Services;
 
@@ -13,6 +13,7 @@ namespace OcNotify;
 /// - 启动配置服务、命名管道服务
 /// - 创建并持有主窗口（ShutdownMode=OnExplicitShutdown，无通知时窗口隐藏但进程常驻）
 /// - 空闲回收：定时检查是否还有 opencode 进程，全部退出后自动关闭本进程
+/// - 电源守卫：PowerGuard 处理 type=power 控制消息，决定是否阻止系统自动休眠
 /// - 窗口始终为全透明分层窗口，毛玻璃/位置均为热更新，无需重建 HWND
 /// </summary>
 public partial class App : Application
@@ -27,6 +28,7 @@ public partial class App : Application
     private ConfigService? _configService;
     private PipeServer? _pipeServer;
     private NotificationManager? _manager;
+    private PowerGuard? _powerGuard;
     private MainWindow? _mainWindow;
     private DispatcherTimer? _idleTimer;
     private int _idleMissCount;
@@ -53,8 +55,21 @@ public partial class App : Application
             _manager = new NotificationManager(Dispatcher, _configService);
             _pipeServer = new PipeServer();
 
-            // 管道消息 → 通知管理器（Manager 内部会切 UI 线程）
-            _pipeServer.MessageReceived += msg => _manager?.Add(msg);
+            // 电源请求守卫：behavior.preventSleep 开启且会话忙碌时阻止系统自动休眠
+            _powerGuard = new PowerGuard(_configService);
+
+            // 管道消息分发：电源控制消息不进通知队列（它是控制指令，不该产生气泡），
+            // 其余交给通知管理器（Manager 内部会切 UI 线程）
+            _pipeServer.MessageReceived += msg =>
+            {
+                if (string.Equals(msg.Type, PowerGuard.MessageType, StringComparison.Ordinal))
+                {
+                    _powerGuard?.Handle(msg);
+                    return;
+                }
+
+                _manager?.Add(msg);
+            };
 
             // CardAdded 等 UI 事件由 MainWindow 构造函数自行订阅，避免双重触发
             CreateMainWindow();
@@ -65,16 +80,7 @@ public partial class App : Application
         catch (Exception ex)
         {
             // 启动失败：记录日志后退出，不留下僵尸进程
-            try
-            {
-                File.AppendAllText(
-                    Path.Combine(Path.GetTempPath(), "oc-notify-error.log"),
-                    $"[{DateTime.Now:O}] {ex}{Environment.NewLine}");
-            }
-            catch
-            {
-                // 日志失败忽略
-            }
+            DiagLog.Write($"[ERROR] App startup failed: {ex}");
 
             Shutdown(1);
         }
@@ -179,6 +185,9 @@ public partial class App : Application
 
         _pipeServer?.Dispose();
         _manager?.Shutdown();
+        // 先释放电源请求再退进程：正常退出路径显式复位，
+        // 避免进程还在收尾的几百毫秒里系统仍被判定为"忙碌"
+        _powerGuard?.Dispose();
         _configService?.Dispose();
 
         if (_singleInstanceMutex is not null)

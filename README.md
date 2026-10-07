@@ -63,6 +63,7 @@
 - **仅非前台弹窗**（`onlyWhenInactive`，默认开）：opencode/终端处于前台时不打扰（同窗口多标签不区分，见[已知局限](#已知局限)）
 - **反误报**：error 后 2s 内的 idle 不二次弹窗；busy→idle 不足 2s 视为短任务跳过；权限请求 300ms 消抖
 - **自动生命周期**：首个 CLI 启动自动拉起 `OcNotify.exe`；全部退出后约 60s 自动关闭；单实例防重复
+- **防休眠**（`preventSleep`，默认关）：opencode 有会话忙碌时屏蔽「无操作后自动睡眠」，空闲后自动恢复
 - **全配置热更新**：改 JSON 即时生效，无需重启
 
 ---
@@ -203,12 +204,13 @@ Remove-Item "$cfg\oc-notify.jsonc.bak" -Force -ErrorAction SilentlyContinue   # 
   },
   "behavior": {
     "durationMs": 8000,          // 停留 8 秒
-    "onlyWhenInactive": true
+    "onlyWhenInactive": true,
+    "preventSleep": true         // 干活时别让电脑睡着（跑长构建/装依赖时强烈建议开）
   }
 }
 ```
 
-**项目级配置**：在项目根目录放 `oc-notify.jsonc`，可只写想覆盖的段（`style` / `behavior` / `events`），运行时与全局合并，仅对该项目生效。
+**项目级配置**：在项目根目录放 `oc-notify.jsonc`，可只写想覆盖的字段（如只写 `{"behavior":{"preventSleep":true}}`），运行时与全局**逐字段**合并，仅对该项目生效。
 
 完整字段见 [配置参考](#配置参考)。
 
@@ -222,6 +224,10 @@ Remove-Item "$cfg\oc-notify.jsonc.bak" -Force -ErrorAction SilentlyContinue   # 
 .\scripts\Send-StackTest.ps1 -Count 7
 
 # type 可选: sessionIdle | permissionAsk | questionAsk | sessionError | subagentDone
+
+# 防休眠：模拟「会话忙碌」，再去管理员 PowerShell 跑 powercfg /requests 看 OcNotify.exe
+.\scripts\Send-PowerTest.ps1 -Hold
+.\scripts\Send-PowerTest.ps1          # 恢复休眠
 ```
 
 ---
@@ -229,7 +235,7 @@ Remove-Item "$cfg\oc-notify.jsonc.bak" -Force -ErrorAction SilentlyContinue   # 
 ## 配置参考
 
 **全局配置**：`%USERPROFILE%\.config\opencode\oc-notify.jsonc`
-**项目级配置**：`<项目根>\oc-notify.jsonc`（按段覆盖全局）
+**项目级配置**：`<项目根>\oc-notify.jsonc`（逐字段覆盖全局）
 
 保存后**即时热更新**，无需重启任何进程。文件为 jsonc：支持 `//` 与 `/* */` 注释及尾逗号。
 
@@ -254,7 +260,8 @@ Remove-Item "$cfg\oc-notify.jsonc.bak" -Force -ErrorAction SilentlyContinue   # 
     "onlyWhenInactive": true,    // 仅 opencode 非前台时弹窗（推荐保持 true）
     "debug": false,              // 调试日志开关
     "idleCheckIntervalMs": 30000,// 空闲检测间隔（毫秒）
-    "idleRetry": 2               // 连续 N 次未发现 opencode 才退出
+    "idleRetry": 2,              // 连续 N 次未发现 opencode 才退出
+    "preventSleep": false        // 阻止 Windows 自动休眠（默认关）
   },
   "events": {
     "sessionIdle": true,         // 对话完成
@@ -292,10 +299,52 @@ Remove-Item "$cfg\oc-notify.jsonc.bak" -Force -ErrorAction SilentlyContinue   # 
 | `debug` | bool | `false` | 调试日志 |
 | `idleCheckIntervalMs` | int | `30000` | exe 空闲检查间隔 |
 | `idleRetry` | int | `2` | 连续未发现次数，总宽限 ≈ interval × retry（默认约 60s） |
+| `preventSleep` | bool | `false` | 会话忙碌期间阻止系统自动休眠，空闲后自动恢复（详见[防休眠](#防休眠-preventsleep)） |
 
 #### events
 
 五个 bool，对应五类提醒的启用开关；插件侧过滤，关闭后完全不发送管道消息。
+
+### 防休眠 preventSleep
+
+跑长构建、装依赖、训模型这类**耗时几分钟以上的任务**时，Windows 的「无操作 10 分钟后睡眠」经常在你回来之前就把机器放倒了。开启后：
+
+```jsonc
+// %USERPROFILE%\.config\opencode\oc-notify.jsonc
+{ "behavior": { "preventSleep": true } }
+```
+
+| 时刻 | 行为 |
+|------|------|
+| 任一会话进入 busy（AI 开始干活） | 向系统申请电源请求，**屏蔽自动睡眠/休眠** |
+| 全部会话 idle（AI 干完） | 释放请求，系统按原有「无操作后睡眠」设置正常入睡 |
+| 运行中把 `preventSleep` 改回 `false` | 1 秒内释放，无需等任何事件 |
+
+**挡什么、不挡什么**
+
+- ✅ 挡：「无操作 N 分钟后自动睡眠/休眠」——也就是你要挡的那个
+- ❌ 不挡：屏幕熄灭（未申请 `ES_DISPLAY_REQUIRED`，屏幕按系统设置正常关）
+- ❌ 不挡：手动休眠/关机（`Win+C` → 休眠、电源键）——**这是有意为之**，用户始终保有最终控制权
+
+**原理**：exe 内一条专用线程调用 `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)` 复位系统空闲计时器，恢复时调 `SetThreadExecutionState(ES_CONTINUOUS)` 清除。全程不碰 `powercfg` 电源计划，全局设置零污染。验证方式：
+
+```powershell
+# 管理员 PowerShell
+powercfg /requests   # busy 期间应出现 [PROCESS] OcNotify.exe
+```
+
+**四层「绝不卡住不休眠」兜底**
+
+| 层 | 触发条件 | 上界 |
+|----|----------|------|
+| exe 租约 | 插件 120s 内无心跳 | **120s**（硬保证，不依赖任何进程状态） |
+| 插件心跳 | 每 60s 幂等重发 | 60s |
+| exe 空闲自退 | 无 opencode 进程 ×2 | ≈60s |
+| 进程死亡 | opencode / exe 退出 | 即时（内核自动回收该进程所有电源请求） |
+
+**多开 opencode**：任一会话忙碌即保持；只有全部会话都 idle 才恢复。
+
+> 该开关只跟随 opencode 的**会话忙闲状态**，不判断你是否在敲键盘。想「只要 opencode 开着就一直不睡」请自行权衡——那样机器永远不睡眠。
 
 ### 部署后文件角色速记
 
@@ -318,6 +367,7 @@ oc-notify.jsonc               → 全局配置（保存即热更新，无需重�
 | 气泡位置不对 | 确认 `style.position`；多显示器检查工作区；改完热更后发新通知 |
 | exe 不自动退出 | 是否还有 opencode 进程（含未关 CLI）；调小 `idleCheckIntervalMs`/`idleRetry` 验证 |
 | exe 不自动启动 | 日志 `ensureOcNotify: spawned` / `exe missing` / `pipe already up`；确认 `assets\OcNotify\OcNotify.exe` 存在 |
+| 防休眠不生效 | ① 确认 `preventSleep: true` 已保存 ② 管理员 PowerShell 跑 `powercfg /requests` 看有无 `OcNotify.exe` ③ 开 `debug` 看 `%TEMP%\oc-notify-error.log` 的 `PowerGuard: sleep blocked/released` |
 | 安装脚本报缺运行时 | 安装 **.NET Desktop Runtime 8.0.x x64** 后重跑 `install.bat` |
 | 修改插件不生效 | 插件仅启动加载 → **必须重启 opencode** |
 | 构建报错 | `dotnet build -warnaserror` 看首条错误；确认 .NET 8 SDK |
@@ -345,7 +395,7 @@ Get-Content "$env:TEMP\oc-notify-plugin.log" -Tail 50
 | 端 | 日志路径 |
 |----|----------|
 | 插件 | `%TEMP%\oc-notify-plugin.log` |
-| exe 错误 | `%TEMP%\oc-notify-error.log` |
+| exe 错误 | `%TEMP%\oc-notify-error.log`（`PowerGuard` 的 blocked/released 也写这里） |
 
 格式：`[ISO时间] [INFO|ERROR] 消息`。覆盖 init/配置快照、事件到达、短任务与 error 抑制、前台拦截原因、管道收发、权限消抖、全部异常。`debug` 支持热更。
 
@@ -370,10 +420,12 @@ Get-Content "$env:TEMP\oc-notify-plugin.log" -Tail 50
 │  ├ PipeServer    接收消息   │
 │  ├ ConfigService 配置热更   │
 │  ├ NotificationManager 队列 │
+│  ├ PowerGuard    电源请求   │  type=power 控制指令专用
 │  └ MainWindow   透明堆叠窗  │
 │       └ NotificationCard×N  │  气泡卡片 + 动画
 └─────────────────────────────┘
-              ▼  屏幕四角气泡
+              ├─→ 屏幕四角气泡
+              └─→ SetThreadExecutionState（阻止/恢复自动睡眠）
 ```
 
 **进程模型**：
@@ -402,6 +454,16 @@ Get-Content "$env:TEMP\oc-notify-plugin.log" -Tail 50
 - 不用 `bun:ffi` 直调 Win32（原生崩溃无法 try-catch，曾导致 TUI 挂掉）
 - 判定粒度仅到**窗口**级，同一 WT 窗口内的多个标签页无法区分 → 见[已知局限](#已知局限)
 
+### 防休眠的实现分工
+
+- **决策在插件**：期望值**每次从 `inflight` 集合现场求值**（`busy → add`，`idle → delete`），不维护第二套计数器，避免与忙闲状态漂移
+- **调用点恰好覆盖 `inflight` 的全部变更处**：busy 分支、`onIdle` 里 `delete` 之后且早于所有提前 `return`、60s `gcTimer` 心跳、`dispose`
+- **心跳是幂等重发**：期望未变时 exe 侧不调 Win32 API，所以重发**绝不会**把还在跑的长任务误释放
+- **执行在 exe**：一条专用线程调 `SetThreadExecutionState`（线程级 API，持有人与清除人必须是同一线程）
+- **exe 侧独立否决**：即便插件还在请求，配置改成 `false` 也立即释放（`ConfigService.ConfigChanged` 驱动）
+
+配置项与使用方式详见[防休眠 preventSleep](#防休眠-preventsleep)。
+
 ### 单实例与空闲退出
 
 - **单实例**：`Mutex("Local\OcNotify.SingleInstance")`，第二个实例立即退出
@@ -420,8 +482,8 @@ Get-Content "$env:TEMP\oc-notify-plugin.log" -Tail 50
 | 事件 | 处理 |
 |------|------|
 | `session.created` / `session.updated` | 缓存 title / parentID |
-| `session.status` | busy 记**首次**时间戳（不覆盖） |
-| `session.idle` | error 抑制 → 短任务过滤 → 取 title → emit |
+| `session.status` | busy 记**首次**时间戳（不覆盖）+ `syncPower()` 请求防休眠 |
+| `session.idle` | `syncPower()` 释放防休眠 → error 抑制 → 短任务过滤 → 取 title → emit |
 | `session.error` | 记时间戳 + 立即 emit |
 | `permission.updated` / `permission.asked` | 300ms 消抖后 emit |
 | `question.asked` | 取 title 后 emit |
@@ -444,11 +506,18 @@ Get-Content "$env:TEMP\oc-notify-plugin.log" -Tail 50
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
-| `type` | ✅ | 五类之一（见功能特性表） |
-| `sessionID` | ✅ | opencode 会话 ID |
-| `sessionTitle` | ✅ | 气泡标题 |
+| `type` | ✅ | 五类提醒之一（见功能特性表），或 `power` 控制指令 |
+| `sessionID` | ✅ | opencode 会话 ID（`power` 时可省略） |
+| `sessionTitle` | ✅ | 气泡标题（`power` 时可省略） |
 | `timestamp` | ✅ | Unix 毫秒 |
 | `configPath` | ❌ | 项目级配置路径，exe 读取后与全局合并 |
+| `hold` | ❌ | 仅 `type=power` 有意义：`true`=请求阻止自动休眠，`false`=恢复 |
+
+**控制指令**（`type: "power"`）：不产生气泡，由 exe 的 `PowerGuard` 消费，只关心 `hold` 与 `configPath`。
+
+```json
+{ "type": "power", "hold": true, "timestamp": 1790000000000 }
+```
 
 **PowerShell 发送示例**：
 
@@ -518,6 +587,9 @@ Start-Process "$env:USERPROFILE\.config\opencode\assets\OcNotify\OcNotify.exe"
 - [ ] 改 `theme`/`position`/`durationMs`/`language` → 下一条通知即生效
 - [ ] 开两个 opencode，关掉一个 → exe 不退；全关 → 约 60s 后 exe 退出
 - [ ] 重复启动 exe → 只存活一个进程
+- [ ] `preventSleep: true` + 会话 busy → `powercfg /requests` 出现 `[PROCESS] OcNotify.exe`
+- [ ] 会话 idle 后 ≤120s 该条目消失；运行中改回 `false` → 1s 内消失
+- [ ] 防休眠开启期间 exe CPU 占用保持低位（PowerGuard 专用线程 5s 轮询，不得空转）
 
 ### 关键设计约定
 
@@ -527,6 +599,9 @@ Start-Process "$env:USERPROFILE\.config\opencode\assets\OcNotify\OcNotify.exe"
 4. **插件**：不用 `bun:ffi`、不用 `node:net` 连管道；前台检测与拉起 exe 走 PowerShell / `fs.openSync`
 5. **挤出**：先 `Items.RemoveAt(0)` 腾槽位再触发动画，否则 `while` 死循环
 6. **busy 时间戳**：只记首次，临近 idle 的重复 busy 不覆盖
+7. **配置合并**：必须在 `JsonNode` 层逐字段做。反序列化成 POCO 后无法区分「字段缺省」与「字段恰好等于默认值」，任何「哪段 project 提供了就用哪段」的写法都会把整段打回默认值
+8. **唤醒原语**：跨线程唤醒一律用计数型 `SemaphoreSlim`，**不要**用 `ManualResetEventSlim`——它是置位锁存的，`Set()` 后不复位会让等待方退化成 100% CPU 空转
+9. **原生调用要幂等**：状态未变就不调 Win32 API。重复心跳若每次都真调，会造成不必要的状态抖动
 
 ### 代码风格
 
@@ -554,17 +629,18 @@ oc-notify/
 │   └── Example.png                   # README 截图（五类气泡效果）
 ├── scripts/
 │   ├── Send-TestNotification.ps1     # 单条管道测试
-│   └── Send-StackTest.ps1            # 连发测试（堆叠/挤出）
+│   ├── Send-StackTest.ps1            # 连发测试（堆叠/挤出）
+│   └── Send-PowerTest.ps1            # 防休眠控制指令测试（配合 powercfg /requests）
 ├── src/
 │   ├── OcNotify/                     # C# WPF 气泡程序
 │   │   ├── OcNotify.csproj           # net8.0-windows / UseWPF
-│   │   ├── App.xaml(.cs)             # 单实例、服务编排、空闲自退
+│   │   ├── App.xaml(.cs)             # 单实例、服务编排、空闲自退、管道路由
 │   │   ├── MainWindow.xaml(.cs)      # 透明容器窗、四角锚点、DPI 定位
 │   │   ├── Controls/
 │   │   │   └── NotificationCard.xaml(.cs)  # 卡片样式 + 进出动画
 │   │   ├── Models/                   # NotifyConfig / NotifyMessage / NotificationItem
-│   │   ├── Services/                 # PipeServer / ConfigService / NotificationManager / DwmHelper
-│   │   └── Helpers/                  # CategoryInfo（分类色/标签双语言双主题）
+│   │   ├── Services/                 # PipeServer / ConfigService / NotificationManager / PowerGuard / DwmHelper
+│   │   └── Helpers/                  # CategoryInfo（分类色/标签双语言双主题）/ DiagLog（exe 侧日志）
 │   └── plugin/
 │       └── notify-bubble.ts          # opencode 插件
 └── .gitignore
@@ -615,6 +691,21 @@ oc-notify/
 ### 祖先 PID 仅在插件启动时采集一次
 
 `collectAncestorPids` 只在插件 init 时执行。若 opencode 所属的终端窗口被重建（关闭重开 WT、终端宿主重启等），PID 集合即失效，检测退化为「仅 opencode 自身 PID 命中才算前台」，多数情况下会**放行**——表现为比预期更吵，而非更静。重开 opencode 即可恢复。
+
+### 防休眠只跟随会话忙闲，不判断你是否在敲键盘
+
+`preventSleep` 的判定依据是 opencode 的 `session.status`（busy / idle），**不感知 Windows 层面的用户输入**。由此有几个边界：
+
+| 场景 | 结果 |
+|------|------|
+| AI 正在跑长构建，你在旁边盯着 | ✅ 保持唤醒（正是目标场景） |
+| AI 跑完了，你去厨房泡茶，机器按 10min 设置入睡 | ✅ 正常睡（正是预期） |
+| AI 已 idle，但你在 TUI 里手动敲 `!npm run build` 这类**不计入 session busy** 的长命令 | ❌ 不保持唤醒，机器仍会按系统设置入睡 |
+| 笔记本 Modern Standby 模式下开着一场长会话 | ⚠️ 会显著耗电（合盖也不睡） |
+
+第三行是唯一的实际缺口：`!` 前缀命令是否推进 session 状态取决于 opencode 版本。若你的长任务主要靠 `!` 命令驱动，请把系统睡眠时间调长，或在该时段手动保持唤醒。
+
+此外 `ES_SYSTEM_REQUIRED` 只挡**自动**休眠。若系统的隐藏电源项 `AllowSystemRequired`（`powercfg` 别名 `SYSTEMREQUIRED`）被设为 0，应用级请求会被系统忽略；该项默认值为 1，正常机器不受影响。
 
 ---
 
