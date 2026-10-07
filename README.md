@@ -29,6 +29,7 @@
 - [架构与原理](#架构与原理)
 - [开发指南](#开发指南)
 - [项目结构](#项目结构)
+- [已知局限](#已知局限)
 - [许可](#许可)
 
 ---
@@ -59,7 +60,7 @@
 
 ### 智能行为
 
-- **仅非前台弹窗**（`onlyWhenInactive`，默认开）：opencode/终端处于前台时不打扰
+- **仅非前台弹窗**（`onlyWhenInactive`，默认开）：opencode/终端处于前台时不打扰（同窗口多标签不区分，见[已知局限](#已知局限)）
 - **反误报**：error 后 2s 内的 idle 不二次弹窗；busy→idle 不足 2s 视为短任务跳过；权限请求 300ms 消抖
 - **自动生命周期**：首个 CLI 启动自动拉起 `OcNotify.exe`；全部退出后约 60s 自动关闭；单实例防重复
 - **全配置热更新**：改 JSON 即时生效，无需重启
@@ -185,6 +186,7 @@ Remove-Item "$cfg\oc-notify.jsonc.bak" -Force -ErrorAction SilentlyContinue   # 
 | 会话刚出错，紧接着 idle | ❌ 不弹（避免双弹） |
 | busy→idle 不足 2 秒的短任务 | ❌ 不弹（降噪） |
 | 对应 `events.xxx` 被关掉 | ❌ 不弹 |
+| 焦点停在**同一 WT 窗口的其他标签页**，那个标签的 opencode 完成 | ❌ 不弹（[已知局限](#已知局限)） |
 
 想"前台也弹"：把 `behavior.onlyWhenInactive` 改为 `false`，保存即生效。
 
@@ -311,6 +313,7 @@ oc-notify.jsonc               → 全局配置（保存即热更新，无需重�
 |------|------|
 | 完全不弹窗 | ① `OcNotify.exe` 是否在跑 ② 管道是否存在：`[System.IO.Directory]::GetFiles("\\.\pipe\") \| ? { $_ -like "*oc-notify*" }` ③ 是否重启过 opencode（插件仅启动加载）④ `debug=true` 看 `%TEMP%\oc-notify-plugin.log` 是否有 `plugin init` |
 | 该弹没弹 | 开 `debug`：看日志是 `event` 未到、`skip: short task`、`skip: recent error`，还是 `emit skip ... foreground`（前台被拦属正常） |
+| 同一 WT 窗口内多开标签，只有一个标签弹 | 命中[已知局限](#已知局限)：`onlyWhenInactive` 的前台判定只能区分窗口、无法区分标签 |
 | 弹了但内容不对 | 检查 `sessionTitle`；日志 `emit [type] title=...` |
 | 气泡位置不对 | 确认 `style.position`；多显示器检查工作区；改完热更后发新通知 |
 | exe 不自动退出 | 是否还有 opencode 进程（含未关 CLI）；调小 `idleCheckIntervalMs`/`idleRetry` 验证 |
@@ -397,6 +400,7 @@ Get-Content "$env:TEMP\oc-notify-plugin.log" -Tail 50
   - 在祖先链内 → 正看着 opencode → 不弹
   - 检测失败 → **放行**（宁可多弹不漏报）
 - 不用 `bun:ffi` 直调 Win32（原生崩溃无法 try-catch，曾导致 TUI 挂掉）
+- 判定粒度仅到**窗口**级，同一 WT 窗口内的多个标签页无法区分 → 见[已知局限](#已知局限)
 
 ### 单实例与空闲退出
 
@@ -569,6 +573,48 @@ oc-notify/
 ### 已知可选增强
 
 - `dotnet publish /p:PublishSingleFile=true --self-contained` 收敛为单 exe（体积换便利，需自行编译）
+
+---
+
+## 已知局限
+
+以下为当前设计的固有边界，非配置错误。
+
+### 同一 Windows Terminal 窗口内，多标签页之间不互相通知
+
+`onlyWhenInactive` 通过「前台窗口 PID 是否落在 opencode 的祖先进程链内」来判断「用户正看着 opencode」。而 Windows Terminal 是多窗口多进程模型：**每个窗口一个 `WindowsTerminal.exe` 进程，窗口内所有标签页共用同一个窗口句柄**。
+
+因此祖先进程链只能定位到**窗口**，无法区分**标签页**，导致：
+
+| 场景 | 结果 |
+|------|------|
+| 你在标签 A 操作，**标签 B** 的 opencode 回复完成 | ❌ 不弹（被误判为「opencode 在前台」） |
+| 焦点停在任意一个 WT 窗口上，该窗口内**所有**标签的 opencode 完成 | ❌ 都不弹 |
+| 焦点离开所有 WT 窗口（如切到浏览器） | ✅ 正常弹 |
+| 焦点在 WT 窗口 1，窗口 2（`Ctrl+Shift+N` 新窗口，**独立进程**）的 opencode 完成 | ✅ 正常弹 |
+
+排查时看日志出现 `shouldNotify: fg=<pid> inAncestors=true allow=false` 即可确认是此项拦截。
+
+**为什么不做按标签页区分**
+
+插件虽是每个 CLI 独立进程，且能通过 `WT_SESSION` 环境变量精确知道「自己属于哪个标签页」，但判定需要的是**反方向**的映射——「当前前台窗口对应哪个标签页」。这一映射无解：
+
+- `GetForegroundWindow()` 只返回顶层窗口句柄，WT 内部的 `HWND → 活动标签页` 对应关系**未对外暴露任何 API**
+- ConPTY 是 headless 的，不存在可见性概念，无法从 shell 侧感知焦点所在标签页
+- 唯一可行的 UI Automation 路径强耦合 WT 版本，且每次检测额外 50–200ms 开销，稳定性与性能代价都高于收益
+
+**变通方式**
+
+- 把 `behavior.onlyWhenInactive` 设为 `false`，改为「宁多勿漏」
+- 或把并行任务分散到**不同 WT 窗口**（而非同一窗口的多标签页）
+
+### `onlyWhenInactive` 同样会拦截权限请求
+
+`permissionAsk` / `questionAsk` 与其他事件共用同一道前台过滤。若焦点在别的应用上、而某个 WT 窗口内的 opencode 正在等待你批准权限，气泡会被吞掉——此时必须切回该窗口才能看到提示。
+
+### 祖先 PID 仅在插件启动时采集一次
+
+`collectAncestorPids` 只在插件 init 时执行。若 opencode 所属的终端窗口被重建（关闭重开 WT、终端宿主重启等），PID 集合即失效，检测退化为「仅 opencode 自身 PID 命中才算前台」，多数情况下会**放行**——表现为比预期更吵，而非更静。重开 opencode 即可恢复。
 
 ---
 

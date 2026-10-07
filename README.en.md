@@ -29,6 +29,7 @@
 - [Architecture](#architecture)
 - [Development](#development)
 - [Project Structure](#project-structure)
+- [Known Limitations](#known-limitations)
 - [License](#license)
 
 ---
@@ -59,7 +60,7 @@ Labels follow `style.language`: Chinese by default (对话完成 / 权限请求 
 
 ### Smart behavior
 
-- **Foreground-only suppression** (`onlyWhenInactive`, default on): no popups while opencode/terminal is focused
+- **Foreground-only suppression** (`onlyWhenInactive`, default on): no popups while opencode/terminal is focused (tabs within one WT window are not distinguished — see [Known Limitations](#known-limitations))
 - **Anti-noise**: no double popup when idle follows an error within 2s; busy→idle under 2s treated as a short task; 300ms debounce on permission requests
 - **Automatic lifecycle**: first CLI spawns `OcNotify.exe`; exits ~60s after all CLIs close; single-instance Mutex
 - **Hot-reload config**: edit JSON and it applies immediately — no restarts
@@ -185,6 +186,7 @@ After install + opencode restart, **nothing else to do**:
 | Error just happened, idle follows immediately | ❌ No (no double popup) |
 | busy→idle under 2 seconds (short task) | ❌ No (noise filter) |
 | Corresponding `events.xxx` turned off | ❌ No |
+| Focus is on **another tab of the same WT window**, and that tab's opencode finished | ❌ No ([known limitation](#known-limitations)) |
 
 Want popups even in the foreground? Set `behavior.onlyWhenInactive` to `false` — applies on save.
 
@@ -311,6 +313,7 @@ oc-notify.jsonc               → global config (hot-reloads on save)
 |---------|---------------|
 | No popups at all | ① Is `OcNotify.exe` running ② Pipe exists: `[System.IO.Directory]::GetFiles("\\.\pipe\") \| ? { $_ -like "*oc-notify*" }` ③ Did you restart opencode (plugin loads at startup only) ④ With `debug=true`, check `%TEMP%\oc-notify-plugin.log` for `plugin init` |
 | Should pop but doesn't | Enable `debug`: is it `event` missing, `skip: short task`, `skip: recent error`, or `emit skip ... foreground` (foreground block is expected) |
+| Multiple tabs in one WT window, only one ever pops | Hits the [known limitation](#known-limitations): `onlyWhenInactive` can tell windows apart, not tabs |
 | Pops but wrong content | Check `sessionTitle`; log line `emit [type] title=...` |
 | Wrong position | Verify `style.position`; check work area on multi-monitor; send a new notification after config hot-reload |
 | exe doesn't exit | Any opencode process left (including unclosed CLIs)? Lower `idleCheckIntervalMs`/`idleRetry` to verify |
@@ -397,6 +400,8 @@ Format: `[ISO time] [INFO|ERROR] message`. Covers init/config snapshot, event ar
   - In the ancestor chain → user is looking at opencode → don't pop
   - Detection failed → **allow** (better an extra popup than a missed one)
 - No `bun:ffi` for Win32 (native crashes can't be try-caught; once broke the TUI)
+
+- Resolution stops at the **window** level — tabs sharing one WT window cannot be told apart → see [Known Limitations](#known-limitations)
 
 ### Single instance & idle exit
 
@@ -569,6 +574,48 @@ oc-notify/
 ### Known optional enhancements
 
 - `dotnet publish /p:PublishSingleFile=true --self-contained` to collapse into a single exe (size vs. convenience; build it yourself)
+
+---
+
+## Known Limitations
+
+These are inherent boundaries of the current design, not misconfiguration.
+
+### Tabs within a single Windows Terminal window don't notify each other
+
+`onlyWhenInactive` decides "is the user looking at opencode" by checking whether the foreground window PID falls inside opencode's ancestor process chain. Windows Terminal is a multi-window, multi-process host: **each window is its own `WindowsTerminal.exe` process, and all tabs in that window share one window handle**.
+
+The ancestor chain therefore resolves to the **window**, never to the **tab**:
+
+| Scenario | Result |
+|----------|--------|
+| You work in tab A, and **tab B**'s opencode finishes | ❌ No popup (misread as "opencode is foreground") |
+| Focus sits on any WT window → **every** tab's opencode in that window finishing | ❌ No popups at all |
+| Focus left all WT windows (e.g. switched to a browser) | ✅ Pops normally |
+| Focus in WT window 1, opencode in window 2 finishes (`Ctrl+Shift+N`, a **separate process**) | ✅ Pops normally |
+
+To confirm this is what blocked you, look for `shouldNotify: fg=<pid> inAncestors=true allow=false` in the debug log.
+
+**Why there is no per-tab detection**
+
+Each CLI runs its own plugin process, and the plugin can tell exactly which tab it belongs to via the `WT_SESSION` environment variable. But the check needs the mapping in the **opposite** direction — "which tab does the current foreground window correspond to" — and that mapping has no solution:
+
+- `GetForegroundWindow()` returns only the top-level window handle; WT keeps its `HWND → active tab` relation entirely internal and **exposes no API for it**
+- ConPTY is headless and has no notion of visibility, so a shell cannot detect which tab holds focus
+- The only viable route, UI Automation, is tightly coupled to WT versions and adds 50–200ms per check — the stability and performance cost outweighs the benefit
+
+**Workarounds**
+
+- Set `behavior.onlyWhenInactive` to `false` and switch to "better too many than too few"
+- Or spread concurrent work across **separate WT windows** rather than tabs in one window
+
+### `onlyWhenInactive` also blocks permission requests
+
+`permissionAsk` / `questionAsk` share the same foreground filter as the other events. If focus is on another app while an opencode inside some WT window is waiting for you to approve a permission, the bubble is swallowed — you have to switch back to that window to see the prompt.
+
+### Ancestor PIDs are collected only once at plugin startup
+
+`collectAncestorPids` runs during plugin init only. If the terminal window hosting opencode is rebuilt (WT closed and reopened, terminal host restart, …), the PID set goes stale and detection degrades to "only opencode's own PID counts as foreground", which **allows** in most cases — i.e. noisier than expected rather than quieter. Restarting opencode restores it.
 
 ---
 
