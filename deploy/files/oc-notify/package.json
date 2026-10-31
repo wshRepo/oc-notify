@@ -1,7 +1,0 @@
-{
-  "name": "oc-notify",
-  "type": "module",
-  "exports": {
-    "./tui": "./notify-bubble.ts"
-  }
-}

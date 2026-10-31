@@ -40,8 +40,8 @@ if not exist "%SRC%\notify-bubble-v1.ts" (
     pause
     exit /b 1
 )
-if not exist "%SRC%\oc-notify\notify-bubble.ts" (
-    echo [X] 未找到部署源: %SRC%\oc-notify\notify-bubble.ts
+if not exist "%SRC%\oc-notify\tui.ts" (
+    echo [X] 未找到部署源: %SRC%\oc-notify\tui.ts
     echo     请确认 deploy\files 目录完整后重试。
     echo.
     pause
@@ -123,8 +123,7 @@ if not exist "%ASSETS%" mkdir "%ASSETS%"
 rem ---------- 4-5. 复制插件和 exe ----------
 echo 复制文件:
 call :COPY_ONE "%SRC%\notify-bubble-v1.ts" "%PLUGINS%\notify-bubble-v1.ts"
-call :COPY_ONE "%SRC%\oc-notify\notify-bubble.ts" "%PLUGINS%\oc-notify\notify-bubble.ts"
-call :COPY_ONE "%SRC%\oc-notify\package.json" "%PLUGINS%\oc-notify\package.json"
+call :COPY_ONE "%SRC%\oc-notify\tui.ts" "%PLUGINS%\oc-notify\tui.ts"
 for %%F in ("%SRC%\OcNotify\*.*") do (
     call :COPY_ONE "%%~fF" "%ASSETS%\%%~nxF"
 )

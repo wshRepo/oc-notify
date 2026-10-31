@@ -1,4 +1,4 @@
-# oc-notify
+﻿# oc-notify
 
 [English](README.en.md) | **简体中文**
 
@@ -95,8 +95,7 @@ deploy/
 └── files/                      ← 部署所需的全部文件
     ├── notify-bubble-v1.ts     插件（opencode1）
     ├── oc-notify/              插件（opencode2 TUI）
-    │   ├── notify-bubble.ts
-    │   └── package.json
+    │   └── tui.ts
     ├── oc-notify.default.jsonc  默认配置模板
     └── OcNotify/               气泡程序（exe + dll + 依赖）
 ```
@@ -374,7 +373,7 @@ oc-notify.jsonc               → 全局配置（保存即热更新，无需重�
 | 该弹没弹 | 开 `debug`：看日志是 `event` 未到、`skip: short task`、`skip: recent error`，还是 `emit skip ... foreground`（前台被拦属正常） |
 | V2 启动时 `opencode.log` 出现 `failed to load plugin ... notify-bubble-v1.ts` | 正常：V1 格式插件被 V2 跳过（双导出改造后应已消失；若你在别处放了旧版散插件文件，删掉即可） |
 | V2 下 plugin list 出现空壳 `oc-notify-v1` | 正常：这是 V1 插件文件为通过 V2 加载校验而注册的无功能空壳，V2 的实际通知由 `plugins\oc-notify\`（TUI 插件）承担 |
-| V2 不弹但 V1 正常 | ① 确认 `plugins\oc-notify\` 目录完整（含 `package.json`）② `opencode.log` 搜 `oc-notify` 看 TUI 插件是否加载 ③ V2 完成信号是 `session.execution.*`，`session.idle` 在 V2 从不发布（上游 #55358） |
+| V2 不弹但 V1 正常 | ① 确认 `plugins\oc-notify\tui.ts` 存在 ② `opencode.log` 搜 `oc-notify` 看 TUI 插件是否加载 ③ V2 完成信号是 `session.execution.*`，`session.idle` 在 V2 从不发布（上游 #55358） |
 | 同一 WT 窗口内多开标签，只有一个标签弹 | 命中[已知局限](#已知局限)：`onlyWhenInactive` 的前台判定只能区分窗口、无法区分标签 |
 | 弹了但内容不对 | 检查 `sessionTitle`；日志 `emit [type] title=...` |
 | 气泡位置不对 | 确认 `style.position`；多显示器检查工作区；改完热更后发新通知 |
@@ -666,8 +665,7 @@ oc-notify/
 │   └── plugin/
 │       ├── notify-bubble-v1.ts       # opencode1 插件（v0 函数导出 + 双导出兼容 V2 加载）
 │       └── oc-notify/                # opencode2 TUI 插件（独立实现）
-│           ├── notify-bubble.ts
-│           └── package.json          # ./tui 入口映射（文件名自定义的关键）
+│           └── tui.ts                # TUI 插件入口（约定文件名自动发现）
 └── .gitignore
 ```
 

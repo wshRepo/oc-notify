@@ -95,8 +95,7 @@ deploy/
 └── files/                      ← everything needed to deploy
     ├── notify-bubble-v1.ts     plugin (opencode1)
     ├── oc-notify/              plugin (opencode2 TUI)
-    │   ├── notify-bubble.ts
-    │   └── package.json
+    │   └── tui.ts
     ├── oc-notify.default.jsonc  default config template
     └── OcNotify/               bubble app (exe + dll + deps)
 ```
@@ -374,7 +373,7 @@ oc-notify.jsonc               → global config (hot-reloads on save)
 | Should pop but doesn't | Enable `debug`: is it `event` missing, `skip: short task`, `skip: recent error`, or `emit skip ... foreground` (foreground block is expected) |
 | `opencode.log` shows `failed to load plugin ... notify-bubble-v1.ts` on V2 startup | Expected/harmless: a V1-format plugin is skipped by V2 (should be gone after the dual-export change; delete any stray legacy plugin file otherwise) |
 | Empty `oc-notify-v1` shell appears in V2's plugin list | Expected: the V1 plugin file registers as a featureless shell to pass V2's load validation; real V2 notifications come from `plugins\oc-notify\` (TUI plugin) |
-| Works on V1 but not V2 | ① Is `plugins\oc-notify\` complete (incl. `package.json`) ② Search `oc-notify` in `opencode.log` to see whether the TUI plugin loaded ③ V2 completion signals are `session.execution.*`; `session.idle` is never emitted in V2 (upstream #55358) |
+| Works on V1 but not V2 | ① Is `plugins\oc-notify\tui.ts` present ② Search `oc-notify` in `opencode.log` to see whether the TUI plugin loaded ③ V2 completion signals are `session.execution.*`; `session.idle` is never emitted in V2 (upstream #55358) |
 | Multiple tabs in one WT window, only one ever pops | Hits the [known limitation](#known-limitations): `onlyWhenInactive` can tell windows apart, not tabs |
 | Pops but wrong content | Check `sessionTitle`; log line `emit [type] title=...` |
 | Wrong position | Verify `style.position`; check work area on multi-monitor; send a new notification after config hot-reload |
@@ -667,8 +666,7 @@ oc-notify/
 │   └── plugin/
 │       ├── notify-bubble-v1.ts       # opencode1 plugin (v0 function export + dual export for V2 load)
 │       └── oc-notify/                # opencode2 TUI plugin (independent implementation)
-│           ├── notify-bubble.ts
-│           └── package.json          # ./tui entry mapping (the key to a custom file name)
+│           └── tui.ts                # TUI plugin entry (conventional name, auto-discovered)
 └── .gitignore
 ```
 
