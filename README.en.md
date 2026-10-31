@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-Windows%20only-blue)
 ![.NET](https://img.shields.io/badge/.NET-8.0-512BD4)
-![opencode](https://img.shields.io/badge/opencode-v1.18%2B-000000)
+![opencode](https://img.shields.io/badge/opencode-v1.18.29%2B%20%7C%20v2.x-000000)
 
 **Windows-only** desktop bubble notifications for **[opencode](https://opencode.ai) CLI**: pop modern toast-style bubbles in the corner of your screen when a reply finishes, a permission is requested, AI asks a question, a session errors, or a subagent completes.
 
@@ -40,11 +40,11 @@
 
 | type | When it fires | Dark-theme accent |
 |------|---------------|-------------------|
-| `sessionIdle` | AI finishes a reply (`session.idle`) | Green `#4ADE80` |
+| `sessionIdle` | AI finishes a reply (V1 `session.idle` / V2 `session.execution.succeeded`) | Green `#4ADE80` |
 | `permissionAsk` | Permission approval required (`permission.asked`) | Amber `#FBBF24` |
-| `questionAsk` | AI asks you a question (`question.asked`) | Purple `#A78BFA` |
-| `sessionError` | Session error (`session.error`) | Red `#F87171` |
-| `subagentDone` | Subagent / subtask done (idle with `parentID`) | Blue `#38BDF8` |
+| `questionAsk` | AI asks you a question (V1 `question.asked` / V2 `form.created`) | Purple `#A78BFA` |
+| `sessionError` | Session error (V1 `session.error` / V2 `session.execution.failed`) | Red `#F87171` |
+| `subagentDone` | Subagent / subtask done (terminal event with `parentID`) | Blue `#38BDF8` |
 
 Labels follow `style.language`: Chinese by default (对话完成 / 权限请求 / …); with `en` they show Done / Permission / Question / Error / Subagent Done.
 
@@ -74,9 +74,11 @@ Labels follow `style.language`: Chinese by default (对话完成 / 权限请求 
 |------|-------------|
 | OS | **Windows 10/11 x64 only** (macOS / Linux not supported; transparency/positioning work without Win11, frosted glass & system corners look best on Win11) |
 | .NET | .NET 8 **Desktop Runtime** (x64) |
-| opencode | v1.18+ (v1 plugin API `@opencode-ai/plugin`) |
+| opencode | **v1.18.29+** (v1 plugin API `@opencode-ai/plugin`) or **v2.x** (TUI plugin API `@opencode/plugin/tui`); both plugins ship in the deploy package and take effect by opencode version |
 
 The plugin runs inside opencode's bundled Bun — **no** separate Node/Bun install needed.
+
+> **Version note**: the opencode1 floor is **v1.18.29** (object-style plugin entrypoints exist since then; on 1.18.0–1.18.28 keep using an older oc-notify). On opencode2 notifications are handled by the TUI plugin (`plugins\oc-notify\`); `notify-bubble-v1.ts` registers as a no-op shell there to silence the load warning.
 
 ---
 
@@ -91,7 +93,10 @@ deploy/
 ├── install.bat                 ← double-click to run
 ├── merge-config.ps1            ← smart config merge script (called by install.bat)
 └── files/                      ← everything needed to deploy
-    ├── notify-bubble.ts        plugin
+    ├── notify-bubble-v1.ts     plugin (opencode1)
+    ├── oc-notify/              plugin (opencode2 TUI)
+    │   ├── notify-bubble.ts
+    │   └── package.json
     ├── oc-notify.default.jsonc  default config template
     └── OcNotify/               bubble app (exe + dll + deps)
 ```
@@ -109,7 +114,8 @@ deploy/
 
 | Source | Destination |
 |--------|-------------|
-| `files\notify-bubble.ts` | `%USERPROFILE%\.config\opencode\plugins\notify-bubble.ts` |
+| `files\notify-bubble-v1.ts` | `%USERPROFILE%\.config\opencode\plugins\notify-bubble-v1.ts` (opencode1) |
+| `files\oc-notify\*` | `%USERPROFILE%\.config\opencode\plugins\oc-notify\` (opencode2 TUI plugin) |
 | `files\OcNotify\*` | `%USERPROFILE%\.config\opencode\assets\OcNotify\` |
 | `files\oc-notify.default.jsonc` | `%USERPROFILE%\.config\opencode\oc-notify.jsonc` |
 
@@ -126,13 +132,14 @@ $cfg  = "$env:USERPROFILE\.config\opencode"
 $exe  = "$cfg\assets\OcNotify"
 $plug = "$cfg\plugins"
 
-New-Item -ItemType Directory -Force -Path $exe, $plug | Out-Null
+New-Item -ItemType Directory -Force -Path $exe, "$plug\oc-notify" | Out-Null
 
 # 1. Publish the bubble app
 dotnet publish src\OcNotify\OcNotify.csproj -c Release -o $exe /p:DebugType=none
 
-# 2. Deploy the plugin
-Copy-Item src\plugin\notify-bubble.ts $plug -Force
+# 2. Deploy the plugins (one for opencode1, one for opencode2)
+Copy-Item src\plugin\notify-bubble-v1.ts $plug -Force
+Copy-Item src\plugin\oc-notify\* "$plug\oc-notify" -Force
 
 # 3. Config (creates on first run; smart-merges if present: add-only, user values win, auto-backup .bak)
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy\merge-config.ps1 `
@@ -158,7 +165,9 @@ Direct send works → exe/pipe are fine; still nothing → the issue is on the p
 ```powershell
 Get-Process OcNotify -ErrorAction SilentlyContinue | Stop-Process -Force
 $cfg = "$env:USERPROFILE\.config\opencode"
-Remove-Item "$cfg\plugins\notify-bubble.ts" -Force -ErrorAction SilentlyContinue
+Remove-Item "$cfg\plugins\notify-bubble-v1.ts" -Force -ErrorAction SilentlyContinue
+Remove-Item "$cfg\plugins\notify-bubble.ts" -Force -ErrorAction SilentlyContinue   # legacy leftover, remove too
+Remove-Item "$cfg\plugins\oc-notify" -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item "$cfg\assets\OcNotify" -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item "$cfg\oc-notify.jsonc" -Force -ErrorAction SilentlyContinue   # also removes config; drop this line to keep it
 Remove-Item "$cfg\oc-notify.jsonc.bak" -Force -ErrorAction SilentlyContinue   # backup created during smart merge
@@ -349,7 +358,8 @@ powercfg /requests   # should list [PROCESS] OcNotify.exe while a session is bus
 ### File roles after deploy
 
 ```
-plugins\notify-bubble.ts      → auto-loaded at opencode startup (listens, spawns exe on demand)
+plugins\notify-bubble-v1.ts   → auto-loaded by opencode1 at startup (listens, spawns exe on demand)
+plugins\oc-notify\            → opencode2 TUI plugin (listens, spawns exe on demand; the directory is the plugin package)
 assets\OcNotify\OcNotify.exe  → the bubble app (single instance, idle-exits after ~60s)
 oc-notify.jsonc               → global config (hot-reloads on save)
 ```
@@ -360,8 +370,11 @@ oc-notify.jsonc               → global config (hot-reloads on save)
 
 | Symptom | What to check |
 |---------|---------------|
-| No popups at all | ① Is `OcNotify.exe` running ② Pipe exists: `[System.IO.Directory]::GetFiles("\\.\pipe\") \| ? { $_ -like "*oc-notify*" }` ③ Did you restart opencode (plugin loads at startup only) ④ With `debug=true`, check `%TEMP%\oc-notify-plugin.log` for `plugin init` |
+| No popups at all | ① Is `OcNotify.exe` running ② Pipe exists: `[System.IO.Directory]::GetFiles("\\.\pipe\") \| ? { $_ -like "*oc-notify*" }` ③ Did you restart opencode (plugin loads at startup only) ④ With `debug=true`, check `%TEMP%\oc-notify-plugin.log` for `plugin init` (V2 lines carry a `[v2]` prefix) |
 | Should pop but doesn't | Enable `debug`: is it `event` missing, `skip: short task`, `skip: recent error`, or `emit skip ... foreground` (foreground block is expected) |
+| `opencode.log` shows `failed to load plugin ... notify-bubble-v1.ts` on V2 startup | Expected/harmless: a V1-format plugin is skipped by V2 (should be gone after the dual-export change; delete any stray legacy plugin file otherwise) |
+| Empty `oc-notify-v1` shell appears in V2's plugin list | Expected: the V1 plugin file registers as a featureless shell to pass V2's load validation; real V2 notifications come from `plugins\oc-notify\` (TUI plugin) |
+| Works on V1 but not V2 | ① Is `plugins\oc-notify\` complete (incl. `package.json`) ② Search `oc-notify` in `opencode.log` to see whether the TUI plugin loaded ③ V2 completion signals are `session.execution.*`; `session.idle` is never emitted in V2 (upstream #55358) |
 | Multiple tabs in one WT window, only one ever pops | Hits the [known limitation](#known-limitations): `onlyWhenInactive` can tell windows apart, not tabs |
 | Pops but wrong content | Check `sessionTitle`; log line `emit [type] title=...` |
 | Wrong position | Verify `style.position`; check work area on multi-monitor; send a new notification after config hot-reload |
@@ -394,10 +407,10 @@ With `"behavior": { "debug": true }`:
 
 | Side | Log path |
 |------|----------|
-| Plugin | `%TEMP%\oc-notify-plugin.log` |
+| Plugin | `%TEMP%\oc-notify-plugin.log` (opencode2 plugin lines carry a `[v2]` prefix) |
 | exe errors | `%TEMP%\oc-notify-error.log` (`PowerGuard` blocked/released entries land here too) |
 
-Format: `[ISO time] [INFO|ERROR] message`. Covers init/config snapshot, event arrival, short-task & error suppression, foreground-block reasons, pipe I/O, permission debounce, and all exceptions. `debug` hot-reloads.
+Format: `[ISO time] [INFO|ERROR] message`. Covers init/config snapshot, event arrival, short-task & error suppression, foreground-block reasons, pipe I/O, permission debounce, multi-instance dedup claims, and all exceptions. `debug` hot-reloads.
 
 ---
 
@@ -407,9 +420,11 @@ Format: `[ISO time] [INFO|ERROR] message`. Covers init/config snapshot, event ar
 
 ```
 ┌─────────────────────────────┐
-│  opencode.exe (CLI/TUI)     │
+│  opencode CLI/TUI           │
 │  ┌───────────────────────┐  │
-│  │ notify-bubble.ts      │  │  events / filters / focus check
+│  │ plugin (by version)   │  │  events / filters / focus check
+│  │ · notify-bubble-v1.ts │  │  (opencode1, server plugin)
+│  │ · oc-notify\ (TUI)    │  │  (opencode2, TUI plugin)
 │  └──────────┬────────────┘  │
 └─────────────┼───────────────┘
               │ named pipe \\.\pipe\oc-notify
@@ -437,9 +452,9 @@ Format: `[ISO time] [INFO|ERROR] message`. Covers init/config snapshot, event ar
 
 ### Event flow (「reply finished」 example)
 
-1. `session.status=busy` → plugin records the **first** busy timestamp
-2. Reply ends → `session.idle`
-3. Filters: within 2s of an error? busy→idle < 2s? event disabled? focused on opencode? → skip on any match
+1. Busy starts (V1 `session.status=busy` / V2 `session.execution.started`) → plugin records the **first** busy timestamp
+2. Reply ends (V1 `session.idle` / V2 `session.execution.succeeded`)
+3. Filters: within 2s of an error? busy→terminal < 2s? event disabled? focused on opencode? (V2 also: already claimed by another TUI instance?) → skip on any match
 4. Fetch session title (cached; with `parentID` classified as `subagentDone`)
 5. One JSON line written to `\\.\pipe\oc-notify` (retry 2× × 500ms on failure)
 6. exe enqueues → evicts oldest if over limit → creates card → enter animation → dock to anchor
@@ -478,16 +493,20 @@ Config and usage: [Sleep prevention `preventSleep`](#sleep-prevention-preventsle
 - Pipe writes are short sync ops + try-catch + bounded retries
 - All exceptions swallowed and logged as `ERROR` — never leak into opencode
 
-### Plugin event table
+### Plugin event table (V1 / V2 event names)
 
-| Event | Handling |
-|-------|----------|
-| `session.created` / `session.updated` | cache title / parentID |
-| `session.status` | record **first** busy timestamp (never overwrite) + `syncPower()` to request sleep prevention |
-| `session.idle` | `syncPower()` to release sleep prevention → error suppression → short-task filter → fetch title → emit |
-| `session.error` | record timestamp + emit immediately |
-| `permission.updated` / `permission.asked` | emit after 300ms debounce |
-| `question.asked` | fetch title → emit |
+| Meaning | opencode1 event | opencode2 event | Handling |
+|---------|-----------------|-----------------|----------|
+| cache title / parentID | `session.created` / `session.updated` | `ctx.data.session` (TUI data layer) | fetch title, classify subagent |
+| busy starts | `session.status` (busy) | `session.execution.started` | record **first** busy timestamp (never overwrite) + `syncPower()` to request sleep prevention |
+| turn finished | `session.idle` | `session.execution.succeeded` | `syncPower()` to release → error suppression → short-task filter → fetch title → emit |
+| interrupted | (folded into idle) | `session.execution.interrupted` | silently skip `shutdown`/`superseded`, otherwise same as finished |
+| session error | `session.error` | `session.execution.failed` | record timestamp + emit immediately (in V2 `failed` is terminal, so busy state is released here) |
+| permission request | `permission.updated` / `permission.asked` | `permission.asked` | emit after 300ms debounce |
+| permission replied | (none) | `permission.replied` | replied inside the debounce window → cancel popup (auto-approvals stay silent) |
+| AI question | `question.asked` | `form.created` | fetch title → emit |
+
+> ⚠️ **V2 note**: `session.idle` / `session.status` are declared in opencode2's types but **never published at runtime** (upstream issue #55358; the fix PR was closed unmerged) — completion always comes from `session.execution.*`. The V2 plugin additionally does **multi-instance dedup** (event-id claiming): V2 TUI plugins run one instance per CLI and the shared service broadcasts every event to all of them, so without dedup each event would pop twice.
 
 ### Named pipe protocol
 
@@ -558,7 +577,8 @@ dotnet run --project src\OcNotify
 dotnet publish src\OcNotify\OcNotify.csproj -c Release -o deploy\files\OcNotify /p:DebugType=none
 
 # Sync plugin and config template into the deploy package
-Copy-Item src\plugin\notify-bubble.ts deploy\files\ -Force
+Copy-Item src\plugin\notify-bubble-v1.ts deploy\files\ -Force
+Copy-Item src\plugin\oc-notify\* deploy\files\oc-notify\ -Force
 Copy-Item config\oc-notify.default.jsonc deploy\files\ -Force
 ```
 
@@ -571,7 +591,8 @@ dotnet build -warnaserror
 
 # 3. Update deploy package + install (or copy only changed files)
 dotnet publish src\OcNotify -c Release -o deploy\files\OcNotify /p:DebugType=none
-Copy-Item src\plugin\notify-bubble.ts deploy\files\ -Force
+Copy-Item src\plugin\notify-bubble-v1.ts deploy\files\ -Force
+Copy-Item src\plugin\oc-notify\* deploy\files\oc-notify\ -Force
 # Double-click deploy\install.bat, or copy manually
 
 # 4. Restart OcNotify.exe (plugin changes also need an opencode restart)
@@ -621,7 +642,8 @@ oc-notify/
 │   ├── install.bat                   # one-click deploy script
 │   ├── merge-config.ps1              # smart config merge script
 │   └── files/                        # distributable package
-│       ├── notify-bubble.ts
+│       ├── notify-bubble-v1.ts       # plugin (opencode1)
+│       ├── oc-notify/                # plugin (opencode2 TUI)
 │       ├── oc-notify.default.jsonc
 │       └── OcNotify/                 # exe + dll + deps
 ├── config/
@@ -643,7 +665,10 @@ oc-notify/
 │   │   ├── Services/                 # PipeServer / ConfigService / NotificationManager / PowerGuard / DwmHelper
 │   │   └── Helpers/                  # CategoryInfo (labels/colors, bilingual + dual theme) / DiagLog (exe-side log)
 │   └── plugin/
-│       └── notify-bubble.ts          # opencode plugin
+│       ├── notify-bubble-v1.ts       # opencode1 plugin (v0 function export + dual export for V2 load)
+│       └── oc-notify/                # opencode2 TUI plugin (independent implementation)
+│           ├── notify-bubble.ts
+│           └── package.json          # ./tui entry mapping (the key to a custom file name)
 └── .gitignore
 ```
 

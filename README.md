@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-Windows%20only-blue)
 ![.NET](https://img.shields.io/badge/.NET-8.0-512BD4)
-![opencode](https://img.shields.io/badge/opencode-v1.18%2B-000000)
+![opencode](https://img.shields.io/badge/opencode-v1.18.29%2B%20%7C%20v2.x-000000)
 
 **Windows 专属**的 **[opencode](https://opencode.ai) CLI** 桌面气泡通知工具：对话完成、权限请求、AI 提问、会话错误、子代理完成时，在屏幕角落弹出现代化气泡提醒。
 
@@ -40,11 +40,11 @@
 
 | type | 触发时机 | 深色主题分类色 |
 |------|----------|----------------|
-| `sessionIdle` | AI 一轮回复完成（`session.idle`） | 绿 `#4ADE80` |
+| `sessionIdle` | AI 一轮回复完成（V1 `session.idle` / V2 `session.execution.succeeded`） | 绿 `#4ADE80` |
 | `permissionAsk` | 需要用户批准权限（`permission.asked`） | 琥珀 `#FBBF24` |
-| `questionAsk` | AI 向你提问（`question.asked`） | 紫 `#A78BFA` |
-| `sessionError` | 会话出错（`session.error`） | 红 `#F87171` |
-| `subagentDone` | 子代理/子任务完成（idle 且存在 `parentID`） | 蓝 `#38BDF8` |
+| `questionAsk` | AI 向你提问（V1 `question.asked` / V2 `form.created`） | 紫 `#A78BFA` |
+| `sessionError` | 会话出错（V1 `session.error` / V2 `session.execution.failed`） | 红 `#F87171` |
+| `subagentDone` | 子代理/子任务完成（终态且存在 `parentID`） | 蓝 `#38BDF8` |
 
 标签随 `style.language` 切换：默认中文（对话完成 / 权限请求 / …），`en` 时显示 Done / Permission / Question / Error / Subagent Done。
 
@@ -74,9 +74,11 @@
 |----|------|
 | OS | **仅 Windows 10/11 x64**（macOS / Linux 不支持；透明与定位不依赖 Win11，毛玻璃/系统圆角在 Win11 最佳） |
 | .NET | .NET 8 **Desktop Runtime**（x64） |
-| opencode | v1.18+（v1 插件接口 `@opencode-ai/plugin`） |
+| opencode | **v1.18.29+**（v1 插件接口 `@opencode-ai/plugin`）或 **v2.x**（TUI 插件接口 `@opencode/plugin/tui`），两代插件随部署包一并安装，按 opencode 版本自动生效 |
 
 插件运行在 opencode 内置 Bun 中，**无需**单独安装 Node/Bun。
+
+> **版本说明**：opencode1 支持下限为 **v1.18.29**（对象式插件入口自此版本支持；1.18.0–1.18.28 请继续使用 oc-notify 旧版）。opencode2 的通知由 TUI 插件（`plugins\oc-notify\`）承担，`notify-bubble-v1.ts` 在 V2 下注册为无功能空壳以消除加载告警。
 
 ---
 
@@ -91,7 +93,10 @@ deploy/
 ├── install.bat                 ← 双击运行
 ├── merge-config.ps1            ← 配置智能合并脚本（install.bat 调用）
 └── files/                      ← 部署所需的全部文件
-    ├── notify-bubble.ts        插件
+    ├── notify-bubble-v1.ts     插件（opencode1）
+    ├── oc-notify/              插件（opencode2 TUI）
+    │   ├── notify-bubble.ts
+    │   └── package.json
     ├── oc-notify.default.jsonc  默认配置模板
     └── OcNotify/               气泡程序（exe + dll + 依赖）
 ```
@@ -109,7 +114,8 @@ deploy/
 
 | 源文件 | 目标 |
 |--------|------|
-| `files\notify-bubble.ts` | `%USERPROFILE%\.config\opencode\plugins\notify-bubble.ts` |
+| `files\notify-bubble-v1.ts` | `%USERPROFILE%\.config\opencode\plugins\notify-bubble-v1.ts`（opencode1） |
+| `files\oc-notify\*` | `%USERPROFILE%\.config\opencode\plugins\oc-notify\`（opencode2 TUI 插件） |
 | `files\OcNotify\*` | `%USERPROFILE%\.config\opencode\assets\OcNotify\` |
 | `files\oc-notify.default.jsonc` | `%USERPROFILE%\.config\opencode\oc-notify.jsonc` |
 
@@ -126,13 +132,14 @@ $cfg  = "$env:USERPROFILE\.config\opencode"
 $exe  = "$cfg\assets\OcNotify"
 $plug = "$cfg\plugins"
 
-New-Item -ItemType Directory -Force -Path $exe, $plug | Out-Null
+New-Item -ItemType Directory -Force -Path $exe, "$plug\oc-notify" | Out-Null
 
 # 1. 发布气泡程序
 dotnet publish src\OcNotify\OcNotify.csproj -c Release -o $exe /p:DebugType=none
 
-# 2. 部署插件
-Copy-Item src\plugin\notify-bubble.ts $plug -Force
+# 2. 部署插件（opencode1 + opencode2 两份）
+Copy-Item src\plugin\notify-bubble-v1.ts $plug -Force
+Copy-Item src\plugin\oc-notify\* "$plug\oc-notify" -Force
 
 # 3. 配置（首次创建；已有则智能合并：只增不删、用户值优先、自动备份 .bak）
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy\merge-config.ps1 `
@@ -158,7 +165,9 @@ Start-Process "$env:USERPROFILE\.config\opencode\assets\OcNotify\OcNotify.exe"
 ```powershell
 Get-Process OcNotify -ErrorAction SilentlyContinue | Stop-Process -Force
 $cfg = "$env:USERPROFILE\.config\opencode"
-Remove-Item "$cfg\plugins\notify-bubble.ts" -Force -ErrorAction SilentlyContinue
+Remove-Item "$cfg\plugins\notify-bubble-v1.ts" -Force -ErrorAction SilentlyContinue
+Remove-Item "$cfg\plugins\notify-bubble.ts" -Force -ErrorAction SilentlyContinue   # 旧版遗留，一并清掉
+Remove-Item "$cfg\plugins\oc-notify" -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item "$cfg\assets\OcNotify" -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item "$cfg\oc-notify.jsonc" -Force -ErrorAction SilentlyContinue   # 一并删配置；想保留配置则去掉这行
 Remove-Item "$cfg\oc-notify.jsonc.bak" -Force -ErrorAction SilentlyContinue   # 智能合并时产生的备份
@@ -349,7 +358,8 @@ powercfg /requests   # busy 期间应出现 [PROCESS] OcNotify.exe
 ### 部署后文件角色速记
 
 ```
-plugins\notify-bubble.ts      → opencode 启动时自动加载（监听事件、按需拉起 exe）
+plugins\notify-bubble-v1.ts   → opencode1 启动时自动加载（监听事件、按需拉起 exe）
+plugins\oc-notify\            → opencode2 TUI 插件（监听事件、按需拉起 exe；目录名即插件包）
 assets\OcNotify\OcNotify.exe  → 气泡程序本体（单实例、约 60s 空闲自退）
 oc-notify.jsonc               → 全局配置（保存即热更新，无需重启）
 ```
@@ -360,8 +370,11 @@ oc-notify.jsonc               → 全局配置（保存即热更新，无需重�
 
 | 现象 | 排查 |
 |------|------|
-| 完全不弹窗 | ① `OcNotify.exe` 是否在跑 ② 管道是否存在：`[System.IO.Directory]::GetFiles("\\.\pipe\") \| ? { $_ -like "*oc-notify*" }` ③ 是否重启过 opencode（插件仅启动加载）④ `debug=true` 看 `%TEMP%\oc-notify-plugin.log` 是否有 `plugin init` |
+| 完全不弹窗 | ① `OcNotify.exe` 是否在跑 ② 管道是否存在：`[System.IO.Directory]::GetFiles("\\.\pipe\") \| ? { $_ -like "*oc-notify*" }` ③ 是否重启过 opencode（插件仅启动加载）④ `debug=true` 看 `%TEMP%\oc-notify-plugin.log` 是否有 `plugin init`（V2 行带 `[v2]` 前缀） |
 | 该弹没弹 | 开 `debug`：看日志是 `event` 未到、`skip: short task`、`skip: recent error`，还是 `emit skip ... foreground`（前台被拦属正常） |
+| V2 启动时 `opencode.log` 出现 `failed to load plugin ... notify-bubble-v1.ts` | 正常：V1 格式插件被 V2 跳过（双导出改造后应已消失；若你在别处放了旧版散插件文件，删掉即可） |
+| V2 下 plugin list 出现空壳 `oc-notify-v1` | 正常：这是 V1 插件文件为通过 V2 加载校验而注册的无功能空壳，V2 的实际通知由 `plugins\oc-notify\`（TUI 插件）承担 |
+| V2 不弹但 V1 正常 | ① 确认 `plugins\oc-notify\` 目录完整（含 `package.json`）② `opencode.log` 搜 `oc-notify` 看 TUI 插件是否加载 ③ V2 完成信号是 `session.execution.*`，`session.idle` 在 V2 从不发布（上游 #55358） |
 | 同一 WT 窗口内多开标签，只有一个标签弹 | 命中[已知局限](#已知局限)：`onlyWhenInactive` 的前台判定只能区分窗口、无法区分标签 |
 | 弹了但内容不对 | 检查 `sessionTitle`；日志 `emit [type] title=...` |
 | 气泡位置不对 | 确认 `style.position`；多显示器检查工作区；改完热更后发新通知 |
@@ -394,10 +407,10 @@ Get-Content "$env:TEMP\oc-notify-plugin.log" -Tail 50
 
 | 端 | 日志路径 |
 |----|----------|
-| 插件 | `%TEMP%\oc-notify-plugin.log` |
+| 插件 | `%TEMP%\oc-notify-plugin.log`（opencode2 插件的行带 `[v2]` 前缀） |
 | exe 错误 | `%TEMP%\oc-notify-error.log`（`PowerGuard` 的 blocked/released 也写这里） |
 
-格式：`[ISO时间] [INFO|ERROR] 消息`。覆盖 init/配置快照、事件到达、短任务与 error 抑制、前台拦截原因、管道收发、权限消抖、全部异常。`debug` 支持热更。
+格式：`[ISO时间] [INFO|ERROR] 消息`。覆盖 init/配置快照、事件到达、短任务与 error 抑制、前台拦截原因、管道收发、权限消抖、多开去重认领、全部异常。`debug` 支持热更。
 
 ---
 
@@ -407,9 +420,11 @@ Get-Content "$env:TEMP\oc-notify-plugin.log" -Tail 50
 
 ```
 ┌─────────────────────────────┐
-│  opencode.exe (CLI/TUI)     │
+│  opencode CLI/TUI           │
 │  ┌───────────────────────┐  │
-│  │ notify-bubble.ts 插件  │  │  事件监听 / 过滤 / 前台检测
+│  │ 插件（按版本二选一）    │  │  事件监听 / 过滤 / 前台检测
+│  │ · notify-bubble-v1.ts │  │  （opencode1，server 插件）
+│  │ · oc-notify\ (TUI)    │  │  （opencode2，TUI 插件）
 │  └──────────┬────────────┘  │
 └─────────────┼───────────────┘
               │ 命名管道 \\.\pipe\oc-notify
@@ -437,9 +452,9 @@ Get-Content "$env:TEMP\oc-notify-plugin.log" -Tail 50
 
 ### 事件流（以「对话完成」为例）
 
-1. `session.status=busy` → 插件记录**首次** busy 时间戳
-2. 回复结束 `session.idle`
-3. 过滤：error 后 2s 内？busy→idle < 2s？事件开关关了？前台是自己？→ 满足任一即跳过
+1. busy 开始（V1 `session.status=busy` / V2 `session.execution.started`）→ 插件记录**首次** busy 时间戳
+2. 回复结束（V1 `session.idle` / V2 `session.execution.succeeded`）
+3. 过滤：error 后 2s 内？busy→终态 < 2s？事件开关关了？前台是自己？（V2 另有：其他 TUI 实例已认领该事件？）→ 满足任一即跳过
 4. 拉 session title（缓存；有 `parentID` 归为 `subagentDone`）
 5. 一行 JSON 写入 `\\.\pipe\oc-notify`（失败重试 2 次 × 500ms）
 6. exe 入队 → 超限先挤出最旧 → 创建卡片 → 进入动画 → 贴锚点
@@ -477,16 +492,20 @@ Get-Content "$env:TEMP\oc-notify-plugin.log" -Tail 50
 - 管道写入同步短操作 + try-catch + 有界重试
 - 异常一律吞掉并记 `ERROR` 日志，绝不外溢到 opencode
 
-### opencode 插件事件表
+### opencode 插件事件表（V1 / V2 事件名对照）
 
-| 事件 | 处理 |
-|------|------|
-| `session.created` / `session.updated` | 缓存 title / parentID |
-| `session.status` | busy 记**首次**时间戳（不覆盖）+ `syncPower()` 请求防休眠 |
-| `session.idle` | `syncPower()` 释放防休眠 → error 抑制 → 短任务过滤 → 取 title → emit |
-| `session.error` | 记时间戳 + 立即 emit |
-| `permission.updated` / `permission.asked` | 300ms 消抖后 emit |
-| `question.asked` | 取 title 后 emit |
+| 语义 | opencode1 事件 | opencode2 事件 | 处理 |
+|------|----------------|----------------|------|
+| 缓存 title / parentID | `session.created` / `session.updated` | `ctx.data.session`（TUI 数据层） | 取 title、判 subagent |
+| busy 开始 | `session.status`（busy） | `session.execution.started` | 记**首次**时间戳（不覆盖）+ `syncPower()` 请求防休眠 |
+| 一轮完成 | `session.idle` | `session.execution.succeeded` | `syncPower()` 释放防休眠 → error 抑制 → 短任务过滤 → 取 title → emit |
+| 打断/终止 | （并入 idle） | `session.execution.interrupted` | `shutdown`/`superseded` 静默跳过，其余同完成路径 |
+| 会话错误 | `session.error` | `session.execution.failed` | 记时间戳 + 立即 emit（V2 中 failed 为终态，需自行释放 busy） |
+| 权限请求 | `permission.updated` / `permission.asked` | `permission.asked` | 300ms 消抖后 emit |
+| 权限已回复 | （无） | `permission.replied` | 消抖窗口内回复完毕 → 取消弹窗（自动批准不弹） |
+| AI 提问 | `question.asked` | `form.created` | 取 title 后 emit |
+
+> ⚠️ **V2 注意**：`session.idle` / `session.status` 在 opencode2 只有类型声明、**运行时从不发布**（上游 issue #55358，修复 PR 未合并），完成信号一律取 `session.execution.*`。V2 插件另做**多开去重**（事件 id 认领）：V2 的 TUI 插件每个 CLI 进程各有一实例，共享服务把同一事件广播给所有实例，不去重会双弹。
 
 ### 命名管道协议
 
@@ -557,7 +576,8 @@ dotnet run --project src\OcNotify
 dotnet publish src\OcNotify\OcNotify.csproj -c Release -o deploy\files\OcNotify /p:DebugType=none
 
 # 同步插件与配置模板到部署包
-Copy-Item src\plugin\notify-bubble.ts deploy\files\ -Force
+Copy-Item src\plugin\notify-bubble-v1.ts deploy\files\ -Force
+Copy-Item src\plugin\oc-notify\* deploy\files\oc-notify\ -Force
 Copy-Item config\oc-notify.default.jsonc deploy\files\ -Force
 ```
 
@@ -570,7 +590,8 @@ dotnet build -warnaserror
 
 # 3. 更新部署包 + 安装（或只复制变动项）
 dotnet publish src\OcNotify -c Release -o deploy\files\OcNotify /p:DebugType=none
-Copy-Item src\plugin\notify-bubble.ts deploy\files\ -Force
+Copy-Item src\plugin\notify-bubble-v1.ts deploy\files\ -Force
+Copy-Item src\plugin\oc-notify\* deploy\files\oc-notify\ -Force
 # 双击 deploy\install.bat，或手动复制到目标目录
 
 # 4. 重启 OcNotify.exe（插件变更还需重启 opencode）
@@ -620,7 +641,8 @@ oc-notify/
 │   ├── install.bat                   # 一键部署脚本
 │   ├── merge-config.ps1              # 配置智能合并脚本
 │   └── files/                        # 分发文件包
-│       ├── notify-bubble.ts
+│       ├── notify-bubble-v1.ts       # 插件（opencode1）
+│       ├── oc-notify/                # 插件（opencode2 TUI）
 │       ├── oc-notify.default.jsonc
 │       └── OcNotify/                 # exe + dll + 依赖
 ├── config/
@@ -642,7 +664,10 @@ oc-notify/
 │   │   ├── Services/                 # PipeServer / ConfigService / NotificationManager / PowerGuard / DwmHelper
 │   │   └── Helpers/                  # CategoryInfo（分类色/标签双语言双主题）/ DiagLog（exe 侧日志）
 │   └── plugin/
-│       └── notify-bubble.ts          # opencode 插件
+│       ├── notify-bubble-v1.ts       # opencode1 插件（v0 函数导出 + 双导出兼容 V2 加载）
+│       └── oc-notify/                # opencode2 TUI 插件（独立实现）
+│           ├── notify-bubble.ts
+│           └── package.json          # ./tui 入口映射（文件名自定义的关键）
 └── .gitignore
 ```
 

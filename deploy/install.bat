@@ -25,7 +25,7 @@ set /a OK=0
 set /a FAIL=0
 set /a SKIP=0
 
-set "VERSION=v1.2.0"
+set "VERSION=v1.3.0"
 
 echo ============================================================
 echo    oc-notify 一键部署  %VERSION%
@@ -33,8 +33,15 @@ echo ============================================================
 echo.
 
 rem ---------- 0. 源文件检查 ----------
-if not exist "%SRC%\notify-bubble.ts" (
-    echo [X] 未找到部署源: %SRC%\notify-bubble.ts
+if not exist "%SRC%\notify-bubble-v1.ts" (
+    echo [X] 未找到部署源: %SRC%\notify-bubble-v1.ts
+    echo     请确认 deploy\files 目录完整后重试。
+    echo.
+    pause
+    exit /b 1
+)
+if not exist "%SRC%\oc-notify\notify-bubble.ts" (
+    echo [X] 未找到部署源: %SRC%\oc-notify\notify-bubble.ts
     echo     请确认 deploy\files 目录完整后重试。
     echo.
     pause
@@ -110,13 +117,25 @@ if not errorlevel 1 (
 
 rem ---------- 3. 创建目标目录 ----------
 if not exist "%PLUGINS%" mkdir "%PLUGINS%"
+if not exist "%PLUGINS%\oc-notify" mkdir "%PLUGINS%\oc-notify"
 if not exist "%ASSETS%" mkdir "%ASSETS%"
 
 rem ---------- 4-5. 复制插件和 exe ----------
 echo 复制文件:
-call :COPY_ONE "%SRC%\notify-bubble.ts" "%PLUGINS%\notify-bubble.ts"
+call :COPY_ONE "%SRC%\notify-bubble-v1.ts" "%PLUGINS%\notify-bubble-v1.ts"
+call :COPY_ONE "%SRC%\oc-notify\notify-bubble.ts" "%PLUGINS%\oc-notify\notify-bubble.ts"
+call :COPY_ONE "%SRC%\oc-notify\package.json" "%PLUGINS%\oc-notify\package.json"
 for %%F in ("%SRC%\OcNotify\*.*") do (
     call :COPY_ONE "%%~fF" "%ASSETS%\%%~nxF"
+)
+
+rem ---------- 5b. 旧版遗留提示（仅提示，不代删） ----------
+rem  旧版（≤ v1.x）把插件部署为 plugins\notify-bubble.ts。新版文件名已改为
+rem  notify-bubble-v1.ts，若旧文件残留，V1 会把两个文件都加载 → 双注册双弹窗。
+rem  按约定这里只提示、由用户手动删除，不擅自改动用户文件。
+if exist "%PLUGINS%\notify-bubble.ts" (
+    echo   [提示] 检测到旧版遗留文件 %PLUGINS%\notify-bubble.ts
+    echo          为避免 V1 重复弹窗，请手动删除该文件（新插件已改名为 notify-bubble-v1.ts^)。
 )
 
 rem ---------- 6. 配置文件（智能合并：只增不删、用户值优先） ----------
@@ -142,7 +161,8 @@ echo   成功: !OK!    跳过: !SKIP!    失败: !FAIL!
 echo ============================================================
 echo.
 echo 目标位置:
-echo   插件   %PLUGINS%\notify-bubble.ts
+echo   插件   %PLUGINS%\notify-bubble-v1.ts        (opencode1^)
+echo   插件   %PLUGINS%\oc-notify\                 (opencode2 TUI 插件^)
 echo   程序   %ASSETS%\OcNotify.exe
 echo   配置   %USER_JSON%
 echo.

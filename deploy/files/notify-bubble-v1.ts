@@ -812,4 +812,18 @@ export const NotifyBubblePlugin: Plugin = async (input: PluginInput): Promise<Ho
   };
 };
 
-export default NotifyBubblePlugin;
+/**
+ * 双导出形态（同一文件同时服务 opencode1 与 opencode2）：
+ * - V1（≥1.18.29）经 readV1Plugin 调用 default.server()，单注册单弹窗，行为与函数导出时代完全一致；
+ *   named 导出 NotifyBubblePlugin 仅供类型引用，V1 不会走枚举路径，不会双注册。
+ * - V2 服务端按 { id, setup } schema 校验散文件（要求 default 是含 id+setup/effect 的对象）。
+ *   这里的 setup 是空实现——V2 的真正实现在 plugins/oc-notify/ 的 TUI 插件里，
+ *   本文件对 V2 只求"静默通过加载、消除启动 WARN"，注册的空壳插件无任何行为。
+ * - 官方"双导出"口径即此形态（V1 调 server()、V2 调 setup()），两个函数共存于同一 default 对象是受支持的。
+ * - 注意：V1 < 1.18.29 的老加载器不认识对象入口，会整模块加载失败——README 环境要求已声明 v1.18.29+。
+ */
+export default {
+  id: "oc-notify-v1",
+  server: NotifyBubblePlugin,
+  setup: () => {},
+};
