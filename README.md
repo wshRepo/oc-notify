@@ -62,7 +62,7 @@
 
 - **仅非前台弹窗**（`onlyWhenInactive`，默认开）：opencode/终端处于前台时不打扰（同窗口多标签不区分，见[已知局限](#已知局限)）
 - **反误报**：error 后 2s 内的 idle 不二次弹窗；busy→idle 不足 2s 视为短任务跳过；权限请求 300ms 消抖
-- **自动生命周期**：首个 CLI 启动自动拉起 `OcNotify.exe`；全部退出后约 60s 自动关闭；单实例防重复
+- **自动生命周期**：首个 CLI 启动自动拉起 `OcNotify.exe`；全部退出后约 60s 自动关闭（V2 的后台共享 service 不计入存活判定）；单实例防重复
 - **防休眠**（`preventSleep`，默认关）：opencode 有会话忙碌时屏蔽「无操作后自动睡眠」，空闲后自动恢复
 - **全配置热更新**：改 JSON 即时生效，无需重启
 
@@ -183,7 +183,7 @@ Remove-Item "$cfg\oc-notify.jsonc.bak" -Force -ErrorAction SilentlyContinue   # 
 1. 在 opencode 中正常对话
 2. AI 回复完成、需要权限、向你提问等时机自动弹出气泡
 3. 气泡默认 **5 秒**自动消失，也可**点击立即关闭**
-4. 关闭所有 opencode 后约 **60 秒**，`OcNotify.exe` 自动退出；下次打开自动再拉起
+4. 关闭所有 opencode 后约 **60 秒**，`OcNotify.exe` 自动退出（V2 的后台共享 service 不计入）；下次打开自动再拉起
 
 ### 何时会弹、何时不弹
 
@@ -377,7 +377,7 @@ oc-notify.jsonc               → 全局配置（保存即热更新，无需重�
 | 同一 WT 窗口内多开标签，只有一个标签弹 | 命中[已知局限](#已知局限)：`onlyWhenInactive` 的前台判定只能区分窗口、无法区分标签 |
 | 弹了但内容不对 | 检查 `sessionTitle`；日志 `emit [type] title=...` |
 | 气泡位置不对 | 确认 `style.position`；多显示器检查工作区；改完热更后发新通知 |
-| exe 不自动退出 | 是否还有 opencode 进程（含未关 CLI）；调小 `idleCheckIntervalMs`/`idleRetry` 验证 |
+| exe 不自动退出 | ① 是否还有 opencode 会话进程（含未关 CLI；V2 后台 service **不计入**）② 调小 `idleCheckIntervalMs`/`idleRetry` 验证 ③ `debug=true` 看 `%TEMP%\oc-notify-error.log` 的 `IdleCheck: ...` 行（应出现 `skip v2 service pid=...`） |
 | exe 不自动启动 | 日志 `ensureOcNotify: spawned` / `exe missing` / `pipe already up`；确认 `assets\OcNotify\OcNotify.exe` 存在 |
 | 防休眠不生效 | ① 确认 `preventSleep: true` 已保存 ② 管理员 PowerShell 跑 `powercfg /requests` 看有无 `OcNotify.exe` ③ 开 `debug` 看 `%TEMP%\oc-notify-error.log` 的 `PowerGuard: sleep blocked/released` |
 | 安装脚本报缺运行时 | 安装 **.NET Desktop Runtime 8.0.x x64** 后重跑 `install.bat` |
@@ -482,7 +482,7 @@ Get-Content "$env:TEMP\oc-notify-plugin.log" -Tail 50
 
 - **单实例**：`Mutex("Local\OcNotify.SingleInstance")`，第二个实例立即退出
 - **拉起**：插件 init 查管道，不存在则经 `cmd /c start "" /b` 跳板启动 exe（脱离 Bun 的 kill-on-close Job，避免 opencode 退出时被连带杀死）
-- **空闲退出**：`DispatcherTimer`（默认 30s×2 次 ≈ 60s）无 `opencode` 进程则退出；间隔/次数可配热更
+- **空闲退出**：`DispatcherTimer`（默认 30s×2 次 ≈ 60s）无 opencode **用户会话**则退出；间隔/次数可配热更。存活判定**排除 V2 的后台共享 service**（`opencode serve --service`）：它在所有 TUI 关闭后仍常驻，直接数进程会让 exe 永不退出。识别依据是 `~\.local\state\opencode\service.json` 注册的 pid（含 PID 复用防御）；V1 无此注册文件，判定行为与旧版完全一致
 
 ### 插件线程模型（不阻塞 opencode）
 

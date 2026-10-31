@@ -1,4 +1,6 @@
 ﻿using System.Diagnostics;
+using System.IO;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Threading;
 using OcNotify.Helpers;
@@ -143,20 +145,97 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// 是否仍有 opencode 进程在运行。
+    /// 是否仍有 opencode 进程在运行（排除 V2 后台共享 service）。
     /// 进程名匹配 opencode（含可能的 opencode.exe 宿主）。
+    ///
+    /// V2 的后台 service（`opencode serve --service`）在所有 TUI 关闭后仍常驻，
+    /// 直接数进程会让本进程永不退出，故按 service 注册文件（~\.local\state\opencode\service.json
+    /// 的 pid 字段）精确排除。V1 无此注册文件——一个进程都不排除，行为与旧版完全一致。
     /// </summary>
-    /// <returns>true=仍在运行。</returns>
-    private static bool IsOpencodeRunning()
+    /// <returns>true=仍有（非 service 的）opencode 在运行。</returns>
+    private bool IsOpencodeRunning()
+    {
+        var debug = _configService?.Current.Behavior.Debug ?? false;
+        try
+        {
+            var servicePid = TryGetV2ServicePid();
+            var procs = Process.GetProcessesByName("opencode");
+            try
+            {
+                var count = 0;
+                foreach (var p in procs)
+                {
+                    if (servicePid.HasValue && p.Id == servicePid.Value && !IsPidReused(p))
+                    {
+                        DiagLog.WriteIfDebug(debug, $"IdleCheck: skip v2 service pid={p.Id}");
+                        continue; // 是 V2 后台 service，不算用户会话
+                    }
+                    count++;
+                }
+                DiagLog.WriteIfDebug(debug, $"IdleCheck: opencode alive={count} (servicePid={servicePid?.ToString() ?? "none"})");
+                return count > 0;
+            }
+            finally
+            {
+                // 统一释放句柄：早返回路径也不能漏掉未遍历的 Process 对象
+                foreach (var p in procs) p.Dispose();
+            }
+        }
+        catch (Exception ex)
+        {
+            // 查询失败时保守认为仍在运行，避免误退出
+            DiagLog.WriteIfDebug(debug, $"IdleCheck: probe failed ({ex.Message}), assume running");
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// 读取 opencode2 后台 service 注册的 PID。
+    /// 来源：%USERPROFILE%\.local\state\opencode\service.json（V2 启动 service 时写入，
+    /// 字段 {"pid": 数字, "url": ..., ...}）。文件不存在/损坏/无 pid 字段一律返回 null
+    /// （= 不排除任何进程），保证 V1 与异常场景走原判定、绝不误杀存活判定。
+    /// </summary>
+    /// <returns>service 的 PID；无法确定时返回 null。</returns>
+    private static int? TryGetV2ServicePid()
     {
         try
         {
-            return Process.GetProcessesByName("opencode").Length > 0;
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var path = Path.Combine(home, ".local", "state", "opencode", "service.json");
+            if (!File.Exists(path)) return null;
+            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            if (doc.RootElement.TryGetProperty("pid", out var pidEl) && pidEl.TryGetInt32(out var pid))
+            {
+                return pid;
+            }
         }
         catch
         {
-            // 查询失败时保守认为仍在运行，避免误退出
-            return true;
+            // 解析失败按"未知"处理，不影响主流程
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// PID 复用防御：注册文件是 service 进程启动后写入的，若当前占着该 PID 的进程
+    /// 启动时间晚于注册文件的写入时间，说明原 service 已死、PID 被新进程复用——
+    /// 此时它可能是用户的真会话，不能排除。读不到启动时间时保守认为未复用。
+    /// </summary>
+    /// <param name="p">候选进程。</param>
+    /// <returns>true=该 PID 已被复用（不应排除）。</returns>
+    private static bool IsPidReused(Process p)
+    {
+        try
+        {
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var path = Path.Combine(home, ".local", "state", "opencode", "service.json");
+            // StartTime 与 GetLastWriteTime 同为本地时间，可直接比较（勿用 Utc 版本）
+            var regTime = File.GetLastWriteTime(path);
+            return p.StartTime > regTime;
+        }
+        catch
+        {
+            return false;
         }
     }
 

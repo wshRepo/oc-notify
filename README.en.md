@@ -62,7 +62,7 @@ Labels follow `style.language`: Chinese by default (对话完成 / 权限请求 
 
 - **Foreground-only suppression** (`onlyWhenInactive`, default on): no popups while opencode/terminal is focused (tabs within one WT window are not distinguished — see [Known Limitations](#known-limitations))
 - **Anti-noise**: no double popup when idle follows an error within 2s; busy→idle under 2s treated as a short task; 300ms debounce on permission requests
-- **Automatic lifecycle**: first CLI spawns `OcNotify.exe`; exits ~60s after all CLIs close; single-instance Mutex
+- **Automatic lifecycle**: first CLI spawns `OcNotify.exe`; exits ~60s after all CLIs close (V2's shared background service is not counted); single-instance Mutex
 - **Sleep prevention** (`preventSleep`, default off): suppresses "sleep after inactivity" while any opencode session is busy; restores automatically once idle
 - **Hot-reload config**: edit JSON and it applies immediately — no restarts
 
@@ -377,7 +377,7 @@ oc-notify.jsonc               → global config (hot-reloads on save)
 | Multiple tabs in one WT window, only one ever pops | Hits the [known limitation](#known-limitations): `onlyWhenInactive` can tell windows apart, not tabs |
 | Pops but wrong content | Check `sessionTitle`; log line `emit [type] title=...` |
 | Wrong position | Verify `style.position`; check work area on multi-monitor; send a new notification after config hot-reload |
-| exe doesn't exit | Any opencode process left (including unclosed CLIs)? Lower `idleCheckIntervalMs`/`idleRetry` to verify |
+| exe doesn't exit | ① Any opencode **user session** process left (including unclosed CLIs; V2's background service is **not** counted) ② Lower `idleCheckIntervalMs`/`idleRetry` to verify ③ With `debug=true`, check `%TEMP%\oc-notify-error.log` for `IdleCheck: ...` lines (`skip v2 service pid=...` should appear) |
 | exe doesn't auto-start | Log `ensureOcNotify: spawned` / `exe missing` / `pipe already up`; confirm `assets\OcNotify\OcNotify.exe` exists |
 | Sleep prevention not working | ① Confirm `preventSleep: true` is saved ② Run `powercfg /requests` as admin and look for `OcNotify.exe` ③ Enable `debug` and check `%TEMP%\oc-notify-error.log` for `PowerGuard: sleep blocked/released` |
 | Installer says runtime missing | Install **.NET Desktop Runtime 8.0.x x64**, re-run `install.bat` |
@@ -483,7 +483,7 @@ Config and usage: [Sleep prevention `preventSleep`](#sleep-prevention-preventsle
 
 - **Single instance**: `Mutex("Local\OcNotify.SingleInstance")`; second instance exits immediately
 - **Spawn**: plugin init checks the pipe; if absent, launches the exe via a `cmd /c start "" /b` trampoline (escapes Bun's kill-on-close Job so it isn't killed when opencode exits)
-- **Idle exit**: `DispatcherTimer` (default 30s × 2 ≈ 60s) with no `opencode` process → exit; interval/count configurable and hot-reloadable
+- **Idle exit**: `DispatcherTimer` (default 30s × 2 ≈ 60s) with no opencode **user session** → exit; interval/count configurable and hot-reloadable. Liveness **excludes V2's shared background service** (`opencode serve --service`): it stays resident after every TUI closes, so raw process counting would keep the exe alive forever. It is identified by the pid registered in `~\.local\state\opencode\service.json` (with PID-reuse defense); on V1 (no such registry file) the check behaves exactly like before
 
 ### Plugin threading model (never blocks opencode)
 
