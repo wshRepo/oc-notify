@@ -64,6 +64,7 @@ Labels follow `style.language`: Chinese by default (对话完成 / 权限请求 
 - **Anti-noise**: no double popup when idle follows an error within 2s; busy→idle under 2s treated as a short task; 300ms debounce on permission requests
 - **Automatic lifecycle**: first CLI spawns `OcNotify.exe`; exits ~60s after all CLIs close (V2's shared background service is not counted); single-instance Mutex
 - **Sleep prevention** (`preventSleep`, default off): suppresses "sleep after inactivity" while any opencode session is busy; restores automatically once idle
+- **Keep screen on during conversations** (`preventScreenOff`, default off): keeps the display awake while a session is busy; forces `preventSleep` on
 - **Hot-reload config**: edit JSON and it applies immediately — no restarts
 
 ---
@@ -269,7 +270,8 @@ Saving **hot-reloads immediately** — no process restarts. The file is jsonc: `
     "debug": false,              // debug logging
     "idleCheckIntervalMs": 30000,// idle check interval (ms)
     "idleRetry": 2,              // exit after N consecutive checks with no opencode
-    "preventSleep": false        // block Windows from auto-sleeping (default off)
+    "preventSleep": false,       // block Windows from auto-sleeping (default off)
+    "preventScreenOff": false    // keep the screen on during conversations (default off; forces preventSleep on)
   },
   "events": {
     "sessionIdle": true,         // reply finished
@@ -308,6 +310,7 @@ Saving **hot-reloads immediately** — no process restarts. The file is jsonc: `
 | `idleCheckIntervalMs` | int | `30000` | exe idle check interval |
 | `idleRetry` | int | `2` | Consecutive misses before exit; total grace ≈ interval × retry (~60s default) |
 | `preventSleep` | bool | `false` | Block system auto-sleep while any session is busy, restore when idle (see [Sleep prevention](#sleep-prevention-preventsleep)) |
+| `preventScreenOff` | bool | `false` | Keep the screen on while any session is busy; forces `preventSleep` to `true` (see [Keep screen on](#keep-screen-on-preventscreenoff)) |
 
 #### events
 
@@ -354,6 +357,35 @@ powercfg /requests   # should list [PROCESS] OcNotify.exe while a session is bus
 
 > This toggle follows opencode's **session busy/idle state** only — it does not track whether you're typing. If you want "never sleep while opencode is open", weigh that carefully: the machine would then never sleep.
 
+### Keep screen on `preventScreenOff`
+
+Windows' "turn off display after N minutes of inactivity" can black out the screen during long AI tasks. When enabled, a busy session requests both sleep prevention and display keep-awake:
+
+```jsonc
+// %USERPROFILE%\.config\opencode\oc-notify.jsonc
+{ "behavior": { "preventScreenOff": true } }
+```
+
+| Moment | Behavior |
+|--------|----------|
+| Any session goes busy (AI starts working) | Requests `ES_SYSTEM_REQUIRED` + `ES_DISPLAY_REQUIRED` — **no auto-sleep, no display power-off** |
+| All sessions go idle (AI finished) | Releases the request; the system's own display/sleep policy resumes |
+| You set `preventScreenOff` back to `false` while running | Display request released within 1 second; if `preventSleep` is still `true`, it falls back to sleep prevention only |
+
+**Relationship with `preventSleep`**
+
+- With `preventScreenOff` on, `preventSleep` is **forced to `true`**: keeping the display on implies the system must not sleep, so `preventSleep: false` no longer vetoes it.
+- Turning `preventScreenOff` off restores the original `preventSleep` value (the config file is never rewritten).
+- With both switches off, the exe holds no power request.
+
+**What it blocks, what it doesn't**
+
+- ✅ Blocks: automatic display power-off and automatic sleep/hibernate
+- ❌ Doesn't block: manual sleep/shutdown, lid close, etc. — **deliberate**, the user keeps final control
+- Shares the same four safety layers (lease / heartbeat / idle exit / process death), so it can never get stuck awake
+
+> This switch also follows session busy/idle only. Verify with `powercfg /requests` in an elevated PowerShell: while busy, `OcNotify.exe` should show both `SYSTEM` and `DISPLAY` requests.
+
 ### File roles after deploy
 
 ```
@@ -380,6 +412,7 @@ oc-notify.jsonc               → global config (hot-reloads on save)
 | exe doesn't exit | ① Any opencode **user session** process left (including unclosed CLIs; V2's background service is **not** counted) ② Lower `idleCheckIntervalMs`/`idleRetry` to verify ③ With `debug=true`, check `%TEMP%\oc-notify-error.log` for `IdleCheck: ...` lines (`skip v2 service pid=...` should appear) |
 | exe doesn't auto-start | Log `ensureOcNotify: spawned` / `exe missing` / `pipe already up`; confirm `assets\OcNotify\OcNotify.exe` exists |
 | Sleep prevention not working | ① Confirm `preventSleep: true` is saved ② Run `powercfg /requests` as admin and look for `OcNotify.exe` ③ Enable `debug` and check `%TEMP%\oc-notify-error.log` for `PowerGuard: sleep blocked/released` |
+| Screen stays off / keep-screen-on not working | ① Confirm `preventScreenOff: true` is saved (`preventSleep` is forced on) ② Run `powercfg /requests` as admin; `OcNotify.exe` should show both `SYSTEM` and `DISPLAY` ③ Enable `debug` and look for `PowerGuard: display kept on` |
 | Installer says runtime missing | Install **.NET Desktop Runtime 8.0.x x64**, re-run `install.bat` |
 | Plugin changes not applied | Plugins load at startup only → **restart opencode** |
 | Build errors | Run `dotnet build -warnaserror` and read the first error; confirm .NET 8 SDK |
@@ -439,7 +472,7 @@ Format: `[ISO time] [INFO|ERROR] message`. Covers init/config snapshot, event ar
 │       └ NotificationCard×N  │  cards + animations
 └─────────────────────────────┘
           ├─→ bubbles in screen corners
-          └─→ SetThreadExecutionState (block / restore auto-sleep)
+          └─→ SetThreadExecutionState (block / restore auto-sleep and display-off)
 ```
 
 **Process model**:
@@ -469,15 +502,15 @@ Format: `[ISO time] [INFO|ERROR] message`. Covers init/config snapshot, event ar
 
 - Resolution stops at the **window** level — tabs sharing one WT window cannot be told apart → see [Known Limitations](#known-limitations)
 
-### Sleep prevention — division of labour
+### Sleep prevention / keep-screen-on — division of labour
 
-- **Decided plugin-side**: the desired state is computed **live from the `inflight` set** on every call (`busy → add`, `idle → delete`). No second counter exists, so it can never drift from the busy/idle state
+- **Decided plugin-side**: the desired state is computed **live from the `inflight` set** on every call (`busy → add`, `idle → delete`). No second counter exists, so it can never drift from the busy/idle state; either `preventSleep` or `preventScreenOff` requests a hold
 - **Call sites cover exactly every mutation of `inflight`**: the busy branch, `onIdle` right after `delete` and *before* every early `return`, the 60s `gcTimer` heartbeat, and `dispose`
 - **The heartbeat is an idempotent re-send**: when the desired state is unchanged the exe doesn't call the Win32 API at all, so a re-send can **never** release a still-running long task
-- **Executed exe-side**: one dedicated thread calls `SetThreadExecutionState` (it's a thread-level API — the acquiring thread and the clearing thread must be the same one)
-- **Independent exe-side veto**: even if the plugin still requests it, flipping the config to `false` releases immediately (driven by `ConfigService.ConfigChanged`)
+- **Executed exe-side**: one dedicated thread calls `SetThreadExecutionState` (it's a thread-level API — the acquiring thread and the clearing thread must be the same one); `preventScreenOff` adds `ES_DISPLAY_REQUIRED` and forces `ES_SYSTEM_REQUIRED`
+- **Independent exe-side veto**: even if the plugin still requests it, turning both switches to `false` releases immediately (driven by `ConfigService.ConfigChanged`); when `preventScreenOff` is on, `preventSleep: false` is not a veto
 
-Config and usage: [Sleep prevention `preventSleep`](#sleep-prevention-preventsleep).
+Config and usage: [Sleep prevention `preventSleep`](#sleep-prevention-preventsleep) and [Keep screen on `preventScreenOff`](#keep-screen-on-preventscreenoff).
 
 ### Single instance & idle exit
 
@@ -609,8 +642,10 @@ Start-Process "$env:USERPROFILE\.config\opencode\assets\OcNotify\OcNotify.exe"
 - [ ] Two CLIs open → closing one doesn't kill the exe; closing all → exits after ~60s
 - [ ] Launching the exe twice → only one instance survives
 - [ ] `preventSleep: true` + busy session → `powercfg /requests` lists `[PROCESS] OcNotify.exe`
+- [ ] `preventScreenOff: true` + busy session → the same entry includes both `SYSTEM` and `DISPLAY`
+- [ ] `preventScreenOff: true` + `preventSleep: false` → still holds a power request (forced-on works)
 - [ ] After idle the entry disappears within 120s; flipping back to `false` → gone within 1s
-- [ ] exe CPU stays low while sleep prevention is on (the PowerGuard thread polls every 5s — it must never spin)
+- [ ] exe CPU stays low while a power request is held (the PowerGuard thread polls every 5s — it must never spin)
 
 ### Key design conventions
 
@@ -716,18 +751,18 @@ Each CLI runs its own plugin process, and the plugin can tell exactly which tab 
 
 `collectAncestorPids` runs during plugin init only. If the terminal window hosting opencode is rebuilt (WT closed and reopened, terminal host restart, …), the PID set goes stale and detection degrades to "only opencode's own PID counts as foreground", which **allows** in most cases — i.e. noisier than expected rather than quieter. Restarting opencode restores it.
 
-### Sleep prevention follows session busy/idle, not your keystrokes
+### Sleep prevention / keep-screen-on follows session busy/idle, not your keystrokes
 
-`preventSleep` is driven purely by opencode's `session.status` (busy / idle) and **does not observe Windows-level user input**. Hence these boundaries:
+`preventSleep` / `preventScreenOff` are driven purely by opencode's `session.status` (busy / idle) and **do not observe Windows-level user input**. Hence these boundaries:
 
 | Scenario | Result |
 |----------|--------|
-| AI is running a long build and you're watching it | ✅ stays awake (the target case) |
-| AI finished, you walk to the kitchen, machine sleeps after 10 min | ✅ sleeps normally (as intended) |
-| AI is idle but you're running a long `!npm run build` from the TUI that **doesn't count as session busy** | ❌ not held — the machine still sleeps per system settings |
+| AI is running a long build and you're watching it | ✅ stays awake / screen stays on (the target case) |
+| AI finished, you walk to the kitchen, machine sleeps / display turns off after 10 min | ✅ sleeps / turns off normally (as intended) |
+| AI is idle but you're running a long `!npm run build` from the TUI that **doesn't count as session busy** | ❌ not held — the machine still sleeps / turns off per system settings |
 | Laptop on Modern Standby with a long session open | ⚠️ drains the battery fast (won't sleep even with the lid closed) |
 
-The third row is the only real gap: whether `!`-prefixed commands advance the session state depends on your opencode version. If your long work is mostly driven by `!` commands, lengthen the system sleep timeout instead, or keep the machine awake manually during that window.
+The third row is the only real gap: whether `!`-prefixed commands advance the session state depends on your opencode version. If your long work is mostly driven by `!` commands, lengthen the system sleep/display timeouts instead, or keep the machine awake manually during that window.
 
 Also note `ES_SYSTEM_REQUIRED` only blocks **automatic** sleep. If the hidden power setting `AllowSystemRequired` (`powercfg` alias `SYSTEMREQUIRED`) is set to 0, application requests are ignored by the system; its default is 1, so normal machines are unaffected.
 

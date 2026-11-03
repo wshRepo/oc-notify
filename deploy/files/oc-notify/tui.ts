@@ -60,6 +60,12 @@ interface BehaviorCfg {
    * 全部会话空闲后自动恢复。屏幕熄灭与手动休眠不受影响。
    */
   preventSleep: boolean;
+  /**
+   * 对话中不息屏（默认关）。
+   * 开启后：会话忙碌期间在防休眠基础上让屏幕保持常亮；
+   * 同时强制开启 preventSleep（preventSleep 的 false 值被忽略）。
+   */
+  preventScreenOff: boolean;
 }
 
 interface PluginCfg {
@@ -81,6 +87,7 @@ const DEFAULT_BEHAVIOR: BehaviorCfg = {
   onlyWhenInactive: true,
   debug: false,
   preventSleep: false,
+  preventScreenOff: false,
 };
 
 /**
@@ -501,7 +508,7 @@ export default Plugin.define({
     let cfg = loadConfig(directory);
     debugLog(
       `config loaded: onlyWhenInactive=${cfg.behavior.onlyWhenInactive} debug=${cfg.behavior.debug} ` +
-        `preventSleep=${cfg.behavior.preventSleep} ` +
+        `preventSleep=${cfg.behavior.preventSleep} preventScreenOff=${cfg.behavior.preventScreenOff} ` +
         `events=${JSON.stringify(cfg.events)} projectCfg=${cfg.projectConfigPath ?? "(none)"}`,
     );
     ancestorPids = await collectAncestorPids();
@@ -564,11 +571,15 @@ export default Plugin.define({
     }
 
     /**
-     * 把「是否阻止系统休眠」同步给 exe。
+     * 把「是否阻止系统休眠 / 保持屏幕常亮」同步给 exe。
      *
      * 期望值**每次都从 inflight 现场求值**，而不是从 powerHold 递推——
      * 这是本函数最关键的设计。心跳重发时看到的长任务仍在 inflight 里，
      * 求出来的必然还是 hold=true，绝不会因为"重发"而把还在跑的任务误释放。
+     *
+     * preventSleep 与 preventScreenOff 任一开启都会发 hold=true：
+     * 不息屏的语义必然要求系统不睡眠，因此 preventScreenOff 会强制开启防休眠
+     * （exe 侧读取同一配置决定是否追加 ES_DISPLAY_REQUIRED）。
      *
      * 调用点覆盖 inflight 的全部变更处（外加 gcTimer 心跳）：
      * - execution.started：inflight.add 之后 → 请求阻止
@@ -580,8 +591,8 @@ export default Plugin.define({
      */
     function syncPower(force = false): void {
       refreshConfig();
-      if (cfg.behavior.preventSleep !== true) {
-        // 开关关闭：只需在"曾经 hold 过"时补发一次释放，之后彻底静默
+      if (cfg.behavior.preventSleep !== true && cfg.behavior.preventScreenOff !== true) {
+        // 两个开关都关闭：只需在"曾经 hold 过"时补发一次释放，之后彻底静默
         if (powerHold === true) {
           powerHold = false;
           writePower(false);

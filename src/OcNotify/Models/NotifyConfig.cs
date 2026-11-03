@@ -121,9 +121,20 @@ public sealed class BehaviorConfig
     /// 手动休眠/关机也不受影响。
     /// 决策在插件侧（它才知道会话忙不忙），本字段同时作为 exe 侧的独立否决：
     /// 此处改为 false 会立即释放请求，不必等插件心跳。
+    /// 注意：preventScreenOff 开启时本字段被强制视为 true，不再具备否决权。
     /// </summary>
     [JsonPropertyName("preventSleep")]
     public bool PreventSleep { get; set; }
+
+    /// <summary>
+    /// 对话中不息屏（默认关）。
+    /// 开启后：会话忙碌期间在阻止系统自动休眠的基础上追加 ES_DISPLAY_REQUIRED，
+    /// 让屏幕保持常亮；会话空闲后恢复系统原有的关屏/睡眠策略。
+    /// 本开关会强制开启 preventSleep（preventSleep 的 false 值被忽略），
+    /// 因为屏幕常亮的语义必然要求系统不进入睡眠。手动休眠/关机仍不受影响。
+    /// </summary>
+    [JsonPropertyName("preventScreenOff")]
+    public bool PreventScreenOff { get; set; }
 }
 
 /// <summary>各提醒事件启用开关。</summary>

@@ -11,8 +11,9 @@ import { homedir, tmpdir } from "node:os";
  * 1. 监听 5 类事件（对话完成/权限/提问/错误/子代理完成），按配置 events 开关过滤
  * 2. 非前台检测（behavior.onlyWhenInactive，默认开）：opencode/终端处于前台时不弹窗
  * 3. 经命名管道 \\.\pipe\oc-notify 发送一行 JSON 给 OcNotify.exe
- * 4. 阻止系统休眠（behavior.preventSleep，默认关）：会话忙碌期间下发 type=power 控制消息，
- *    由 exe 的 PowerGuard 申请 Windows 电源请求；会话空闲后自动释放。
+ * 4. 阻止系统休眠 / 对话中不息屏（behavior.preventSleep / preventScreenOff，默认关）：
+ *    会话忙碌期间下发 type=power 控制消息，由 exe 的 PowerGuard 申请 Windows 电源请求；
+ *    会话空闲后自动释放。preventScreenOff 开启时会强制开启防休眠。
  *    本插件只负责"意图"，原生电源调用与租约兜底全在 exe 侧。
  *
  * 线程模型（避免阻塞 opencode 主流程）：
@@ -44,6 +45,12 @@ interface BehaviorCfg {
    * 全部会话空闲后自动恢复。屏幕熄灭与手动休眠不受影响。
    */
   preventSleep: boolean;
+  /**
+   * 对话中不息屏（默认关）。
+   * 开启后：会话忙碌期间在防休眠基础上让屏幕保持常亮；
+   * 同时强制开启 preventSleep（preventSleep 的 false 值被忽略）。
+   */
+  preventScreenOff: boolean;
 }
 
 interface PluginCfg {
@@ -65,6 +72,7 @@ const DEFAULT_BEHAVIOR: BehaviorCfg = {
   onlyWhenInactive: true,
   debug: false,
   preventSleep: false,
+  preventScreenOff: false,
 };
 
 /**
@@ -425,7 +433,7 @@ export const NotifyBubblePlugin: Plugin = async (input: PluginInput): Promise<Ho
   let cfg = loadConfig(directory);
   debugLog(
     `config loaded: onlyWhenInactive=${cfg.behavior.onlyWhenInactive} debug=${cfg.behavior.debug} ` +
-      `preventSleep=${cfg.behavior.preventSleep} ` +
+      `preventSleep=${cfg.behavior.preventSleep} preventScreenOff=${cfg.behavior.preventScreenOff} ` +
       `events=${JSON.stringify(cfg.events)} projectCfg=${cfg.projectConfigPath ?? "(none)"}`,
   );
   ancestorPids = await collectAncestorPids();
@@ -484,11 +492,15 @@ export const NotifyBubblePlugin: Plugin = async (input: PluginInput): Promise<Ho
   }
 
   /**
-   * 把「是否阻止系统休眠」同步给 exe。
+   * 把「是否阻止系统休眠 / 保持屏幕常亮」同步给 exe。
    *
    * 期望值**每次都从 inflight 现场求值**，而不是从 powerHold 递推——
    * 这是本函数最关键的设计。心跳重发时看到的长任务仍在 inflight 里，
    * 求出来的必然还是 hold=true，绝不会因为"重发"而把还在跑的任务误释放。
+   *
+   * preventSleep 与 preventScreenOff 任一开启都会发 hold=true：
+   * 不息屏的语义必然要求系统不睡眠，因此 preventScreenOff 会强制开启防休眠
+   * （exe 侧读取同一配置决定是否追加 ES_DISPLAY_REQUIRED）。
    *
    * 调用点正好覆盖 inflight 的全部变更处（外加 gcTimer 心跳）：
    * - session.status=busy：inflight.add 之后 → 请求阻止
@@ -500,8 +512,8 @@ export const NotifyBubblePlugin: Plugin = async (input: PluginInput): Promise<Ho
    */
   function syncPower(force = false): void {
     refreshConfig();
-    if (cfg.behavior.preventSleep !== true) {
-      // 开关关闭：只需在"曾经 hold 过"时补发一次释放，之后彻底静默
+    if (cfg.behavior.preventSleep !== true && cfg.behavior.preventScreenOff !== true) {
+      // 两个开关都关闭：只需在"曾经 hold 过"时补发一次释放，之后彻底静默
       if (powerHold === true) {
         powerHold = false;
         writePower(false);

@@ -1,14 +1,17 @@
 # Send-PowerTest.ps1
-# 向 oc-notify 命名管道发送电源控制消息（type=power），用于手工验证 behavior.preventSleep。
+# 向 oc-notify 命名管道发送电源控制消息（type=power），用于手工验证
+# behavior.preventSleep / behavior.preventScreenOff。
 #
 # 用法：
-#   .\Send-PowerTest.ps1 -Hold          # 请求阻止休眠（模拟"会话忙碌"）
-#   .\Send-PowerTest.ps1                # 请求恢复休眠（模拟"会话空闲"）
+#   .\Send-PowerTest.ps1 -Hold          # 请求阻止休眠/保持屏幕常亮（模拟"会话忙碌"）
+#   .\Send-PowerTest.ps1                # 请求恢复休眠/关屏（模拟"会话空闲"）
 #   .\Send-PowerTest.ps1 -Hold -ConfigPath "D:\proj\oc-notify.jsonc"   # 带项目级配置
 #
 # 验证步骤（需管理员 PowerShell 查看 powercfg /requests）：
 #   1. 运行 -Hold，等 1~2 秒
 #   2. powercfg /requests  → 应出现 [PROCESS] OcNotify.exe 的 power request
+#      - 仅 preventSleep=true：只有 SYSTEM 请求
+#      - preventScreenOff=true：SYSTEM + DISPLAY 请求（后者强制开启防休眠）
 #   3. 不带参数运行一次，powercfg /requests  → 该条目应消失
 #   4. 什么都不做静置 120s（PowerGuard 租约），也必须自动消失
 

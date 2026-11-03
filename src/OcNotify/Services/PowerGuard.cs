@@ -5,25 +5,28 @@ using OcNotify.Models;
 namespace OcNotify.Services;
 
 /// <summary>
-/// 系统电源请求守卫：把"期望阻止 Windows 自动休眠"翻译成 Win32 电源请求。
+/// 系统电源请求守卫：把"期望阻止 Windows 自动休眠 / 保持屏幕常亮"翻译成 Win32 电源请求。
 ///
 /// 原理：
 /// SetThreadExecutionState 是**线程级** API，系统按线程计数；
 /// 只要还有线程持有 ES_SYSTEM_REQUIRED 就不进入自动睡眠。
 /// 因此本类内部常驻一条专用线程，持有人与清除人必须是同一条线程。
 ///
-/// 为什么用 ES_CONTINUOUS | ES_SYSTEM_REQUIRED 而不是别的方式：
-/// - ES_CONTINUOUS 让状态持续有效，不需要周期性重复调用（重复调用反而制造节流抖动）；
-/// - ES_SYSTEM_REQUIRED 只阻止**自动**休眠，屏幕照常熄灭（关屏由 ES_DISPLAY_REQUIRED 控制），
-///   手动休眠/关机也不受影响——用户始终保有最终控制权；
-/// - 不碰 powercfg 电源计划，全局设置零污染。
+/// 两种请求模式（对应 behavior.preventSleep / behavior.preventScreenOff）：
+/// - 防休眠：ES_CONTINUOUS | ES_SYSTEM_REQUIRED，只阻止**自动**休眠，屏幕照常熄灭；
+/// - 不息屏：ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED，
+///   在防休眠基础上复位显示空闲计时器，屏幕也保持常亮。
+/// 手动休眠/关机不受影响——用户始终保有最终控制权；也不碰 powercfg 电源计划，全局设置零污染。
 ///
-/// 双重安全保证（都要求"绝不能出现卡住不休眠"）：
+/// preventScreenOff 开启时强制开启 preventSleep：即使 preventSleep=false，
+/// 仍会申请 ES_SYSTEM_REQUIRED（屏幕常亮的语义必然要求系统不睡眠）。
+///
+/// 双重安全保证（都要求"绝不能出现卡住不休眠/不息屏"）：
 /// 1. 进程死亡时内核自动回收该进程持有的所有电源请求，崩溃/强杀不会残留；
 /// 2. 租约：插件需每 LeaseMs 内至少下发一次心跳，否则到点自动释放。
 ///    这条不依赖任何进程状态，覆盖 opencode 崩溃 / 插件 dispose / 管道写失败等场景。
 ///
-/// 配置否决：即使插件仍在请求，behavior.preventSleep 被改为 false 时也会立即释放
+/// 配置否决：即使插件仍在请求，两个开关都关闭时也会立即释放
 /// （由 ConfigService.ConfigChanged 驱动），构成对插件侧的独立校验。
 /// </summary>
 public sealed class PowerGuard : IDisposable
@@ -50,8 +53,28 @@ public sealed class PowerGuard : IDisposable
         /// <summary>重置系统空闲计时器，阻止自动进入睡眠/休眠。返回值为 0 表示失败。</summary>
         SystemRequired = 0x00000001,
 
+        /// <summary>重置显示空闲计时器，保持屏幕常亮（行为上同时要求系统不睡眠）。</summary>
+        DisplayRequired = 0x00000002,
+
         /// <summary>让上一个标志持续有效，直到下一次带 ES_CONTINUOUS 的调用清除它。</summary>
         Continuous = 0x80000000,
+    }
+
+    /// <summary>
+    /// 已实际应用到系统的请求档位。
+    /// 用三态而非两个 bool：屏幕常亮必然包含防休眠，档位天然互斥，
+    /// 比较"期望档位 != 已应用档位"即可决定是否调用 Win32，避免状态组合出错。
+    /// </summary>
+    private enum PowerMode
+    {
+        /// <summary>未持有任何电源请求。</summary>
+        Off,
+
+        /// <summary>仅阻止自动休眠（ES_SYSTEM_REQUIRED）。</summary>
+        SleepBlocked,
+
+        /// <summary>阻止自动休眠并保持屏幕常亮（ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED）。</summary>
+        ScreenOn,
     }
 
     [DllImport("kernel32.dll", SetLastError = true)]
@@ -78,8 +101,8 @@ public sealed class PowerGuard : IDisposable
     /// <summary>最近一次收到 power 消息的时刻（Environment.TickCount64，跨线程用 Interlocked 读写）。</summary>
     private long _lastSignalMs;
 
-    /// <summary>专用线程上已实际应用的请求状态；与"期望"不一致才调 Win32 API。</summary>
-    private bool _applied;
+    /// <summary>专用线程上已实际应用的请求档位；与"期望"不一致才调 Win32 API。</summary>
+    private PowerMode _appliedMode = PowerMode.Off;
 
     /// <summary>已置位则不再求值，防止 P/Invoke 失败时疯狂重试刷日志。</summary>
     private bool _nativeBroken;
@@ -90,7 +113,7 @@ public sealed class PowerGuard : IDisposable
     /// <summary>
     /// 构造：订阅配置热更并启动专用线程。
     /// </summary>
-    /// <param name="configService">配置服务（提供 behavior.preventSleep 与热更事件）。</param>
+    /// <param name="configService">配置服务（提供 behavior.preventSleep / preventScreenOff 与热更事件）。</param>
     public PowerGuard(ConfigService configService)
     {
         _configService = configService;
@@ -110,7 +133,8 @@ public sealed class PowerGuard : IDisposable
 
     /// <summary>
     /// 处理一条 type=power 的管道消息：记录心跳时间与意图，然后唤醒专用线程重新求值。
-    /// 与 NotificationManager.AddInternal 保持一致：带项目级配置路径时先重载，保证项目级 preventSleep 生效。
+    /// 与 NotificationManager.AddInternal 保持一致：带项目级配置路径时先重载，
+    /// 保证项目级 preventSleep / preventScreenOff 生效。
     /// </summary>
     /// <param name="message">管道消息。</param>
     public void Handle(NotifyMessage message)
@@ -139,8 +163,9 @@ public sealed class PowerGuard : IDisposable
     }
 
     /// <summary>
-    /// 专用线程主体：持续把"期望状态"收敛到 Win32 电源请求。
-    /// 期望 = 插件意图 && 租约未过期 && 配置开关开启（三者与，缺一即释放）。
+    /// 专用线程主体：持续把"期望档位"收敛到 Win32 电源请求。
+    /// 期望 = 插件意图 && 租约未过期 && 任一配置开关开启（缺一即释放）。
+    /// 其中 preventScreenOff 优先映射为 ScreenOn，并强制包含防休眠语义。
     /// </summary>
     /// <param name="ct">取消令牌。</param>
     private void Run(CancellationToken ct)
@@ -157,12 +182,21 @@ public sealed class PowerGuard : IDisposable
                 var leaseValid =
                     _desired &&
                     Environment.TickCount64 - Interlocked.Read(ref _lastSignalMs) < LeaseMs;
-                var want = leaseValid && cfg.Behavior.PreventSleep;
 
-                // 只有期望与实际不一致才调 Win32：心跳重发 hold 时这里是 no-op，零 API 调用零抖动
-                if (want != _applied)
+                // preventScreenOff 开启时强制防休眠：preventSleep=false 不再构成否决。
+                // 两者都关时才允许释放，构成 exe 侧对插件意图的独立校验。
+                var want = PowerMode.Off;
+                if (leaseValid && (cfg.Behavior.PreventSleep || cfg.Behavior.PreventScreenOff))
                 {
-                    _applied = Apply(want, debug);
+                    want = cfg.Behavior.PreventScreenOff
+                        ? PowerMode.ScreenOn
+                        : PowerMode.SleepBlocked;
+                }
+
+                // 只有期望档位与已应用档位不一致才调 Win32：心跳重发 hold 时这里是 no-op，零 API 调用零抖动
+                if (want != _appliedMode)
+                {
+                    _appliedMode = Apply(want, debug);
                 }
 
                 _wake.Wait(PollMs, ct);
@@ -190,26 +224,38 @@ public sealed class PowerGuard : IDisposable
     /// <summary>
     /// 应用一次电源请求并更新本地状态。
     /// </summary>
-    /// <param name="want">期望阻止休眠与否。</param>
+    /// <param name="want">期望的请求档位。</param>
     /// <param name="debug">是否写调试日志。</param>
-    /// <returns>实际成功应用的状态（P/Invoke 失败时返回 false，避免刷日志重试）。</returns>
-    private bool Apply(bool want, bool debug)
+    /// <returns>实际成功应用的档位（P/Invoke 失败时返回 Off，下一轮会重试）。</returns>
+    private PowerMode Apply(PowerMode want, bool debug)
     {
-        var flags = want
-            ? ExecutionState.Continuous | ExecutionState.SystemRequired
-            : ExecutionState.Continuous;
+        var flags = ExecutionState.Continuous;
+        if (want is PowerMode.SleepBlocked or PowerMode.ScreenOn)
+        {
+            flags |= ExecutionState.SystemRequired;
+        }
+
+        if (want == PowerMode.ScreenOn)
+        {
+            flags |= ExecutionState.DisplayRequired;
+        }
 
         if (SetRequest(flags))
         {
-            DiagLog.WriteIfDebug(debug, want
-                ? "[INFO] PowerGuard: sleep blocked (ES_SYSTEM_REQUIRED)"
-                : "[INFO] PowerGuard: sleep released");
+            DiagLog.WriteIfDebug(debug, want switch
+            {
+                PowerMode.ScreenOn =>
+                    "[INFO] PowerGuard: display kept on (ES_SYSTEM_REQUIRED|ES_DISPLAY_REQUIRED)",
+                PowerMode.SleepBlocked =>
+                    "[INFO] PowerGuard: sleep blocked (ES_SYSTEM_REQUIRED)",
+                _ => "[INFO] PowerGuard: sleep released",
+            });
             return want;
         }
 
         DiagLog.Write($"[ERROR] PowerGuard: SetThreadExecutionState failed, " +
                       $"lastError={Marshal.GetLastWin32Error()} want={want}");
-        return false;
+        return PowerMode.Off;
     }
 
     /// <summary>

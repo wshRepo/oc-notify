@@ -64,6 +64,7 @@
 - **反误报**：error 后 2s 内的 idle 不二次弹窗；busy→idle 不足 2s 视为短任务跳过；权限请求 300ms 消抖
 - **自动生命周期**：首个 CLI 启动自动拉起 `OcNotify.exe`；全部退出后约 60s 自动关闭（V2 的后台共享 service 不计入存活判定）；单实例防重复
 - **防休眠**（`preventSleep`，默认关）：opencode 有会话忙碌时屏蔽「无操作后自动睡眠」，空闲后自动恢复
+- **对话中不息屏**（`preventScreenOff`，默认关）：会话忙碌时保持屏幕常亮；开启后 `preventSleep` 被强制视为开启
 - **全配置热更新**：改 JSON 即时生效，无需重启
 
 ---
@@ -269,7 +270,8 @@ Remove-Item "$cfg\oc-notify.jsonc.bak" -Force -ErrorAction SilentlyContinue   # 
     "debug": false,              // 调试日志开关
     "idleCheckIntervalMs": 30000,// 空闲检测间隔（毫秒）
     "idleRetry": 2,              // 连续 N 次未发现 opencode 才退出
-    "preventSleep": false        // 阻止 Windows 自动休眠（默认关）
+    "preventSleep": false,       // 阻止 Windows 自动休眠（默认关）
+    "preventScreenOff": false    // 对话中不息屏（默认关，开启后 preventSleep 强制开启）
   },
   "events": {
     "sessionIdle": true,         // 对话完成
@@ -308,6 +310,7 @@ Remove-Item "$cfg\oc-notify.jsonc.bak" -Force -ErrorAction SilentlyContinue   # 
 | `idleCheckIntervalMs` | int | `30000` | exe 空闲检查间隔 |
 | `idleRetry` | int | `2` | 连续未发现次数，总宽限 ≈ interval × retry（默认约 60s） |
 | `preventSleep` | bool | `false` | 会话忙碌期间阻止系统自动休眠，空闲后自动恢复（详见[防休眠](#防休眠-preventsleep)） |
+| `preventScreenOff` | bool | `false` | 对话中不息屏：会话忙碌期间保持屏幕常亮；开启后 `preventSleep` 强制视为 `true`（详见[对话中不息屏](#对话中不息屏-preventscreenoff)） |
 
 #### events
 
@@ -354,6 +357,35 @@ powercfg /requests   # busy 期间应出现 [PROCESS] OcNotify.exe
 
 > 该开关只跟随 opencode 的**会话忙闲状态**，不判断你是否在敲键盘。想「只要 opencode 开着就一直不睡」请自行权衡——那样机器永远不睡眠。
 
+### 对话中不息屏 preventScreenOff
+
+Windows 的「无操作 N 分钟后关闭屏幕」会在 AI 长任务期间让屏幕黑掉。开启后，opencode 有会话忙碌时会同时申请防休眠与显示常亮：
+
+```jsonc
+// %USERPROFILE%\.config\opencode\oc-notify.jsonc
+{ "behavior": { "preventScreenOff": true } }
+```
+
+| 时刻 | 行为 |
+|------|------|
+| 任一会话进入 busy（AI 开始干活） | 申请 `ES_SYSTEM_REQUIRED` + `ES_DISPLAY_REQUIRED`，**系统不睡眠、屏幕不熄灭** |
+| 全部会话 idle（AI 干完） | 释放请求，恢复系统原有的关屏/睡眠策略 |
+| 运行中把 `preventScreenOff` 改回 `false` | 1 秒内释放屏幕请求；若 `preventSleep` 仍为 `true`，降级为仅防休眠 |
+
+**与 preventSleep 的关系**
+
+- 开启 `preventScreenOff` 后，`preventSleep` 被**强制视为 `true`**：屏幕常亮的语义必然要求系统不睡眠，因此 `preventSleep: false` 不再构成否决。
+- 关闭 `preventScreenOff` 后，立即恢复 `preventSleep` 的原始配置值（配置文件本身不会被改写）。
+- 两个开关都关闭时，exe 不持有任何电源请求。
+
+**挡什么、不挡什么**
+
+- ✅ 挡：自动关屏、自动睡眠/休眠
+- ❌ 不挡：手动休眠/关机、合盖等用户主动操作——**这是有意为之**，用户始终保有最终控制权
+- 与防休眠共享同一套四层兜底（租约/心跳/空闲自退/进程死亡），不会卡住不息屏
+
+> 该开关同样只跟随 opencode 的会话忙闲状态。验证：管理员 PowerShell 跑 `powercfg /requests`，busy 期间 `OcNotify.exe` 应同时出现 `SYSTEM` 与 `DISPLAY` 请求。
+
 ### 部署后文件角色速记
 
 ```
@@ -380,6 +412,7 @@ oc-notify.jsonc               → 全局配置（保存即热更新，无需重�
 | exe 不自动退出 | ① 是否还有 opencode 会话进程（含未关 CLI；V2 后台 service **不计入**）② 调小 `idleCheckIntervalMs`/`idleRetry` 验证 ③ `debug=true` 看 `%TEMP%\oc-notify-error.log` 的 `IdleCheck: ...` 行（应出现 `skip v2 service pid=...`） |
 | exe 不自动启动 | 日志 `ensureOcNotify: spawned` / `exe missing` / `pipe already up`；确认 `assets\OcNotify\OcNotify.exe` 存在 |
 | 防休眠不生效 | ① 确认 `preventSleep: true` 已保存 ② 管理员 PowerShell 跑 `powercfg /requests` 看有无 `OcNotify.exe` ③ 开 `debug` 看 `%TEMP%\oc-notify-error.log` 的 `PowerGuard: sleep blocked/released` |
+| 不息屏不生效 | ① 确认 `preventScreenOff: true` 已保存（`preventSleep` 会被强制视为开启）② 管理员 PowerShell 跑 `powercfg /requests`，`OcNotify.exe` 应同时有 `SYSTEM` 与 `DISPLAY` ③ 开 `debug` 看 `PowerGuard: display kept on` |
 | 安装脚本报缺运行时 | 安装 **.NET Desktop Runtime 8.0.x x64** 后重跑 `install.bat` |
 | 修改插件不生效 | 插件仅启动加载 → **必须重启 opencode** |
 | 构建报错 | `dotnet build -warnaserror` 看首条错误；确认 .NET 8 SDK |
@@ -439,7 +472,7 @@ Get-Content "$env:TEMP\oc-notify-plugin.log" -Tail 50
 │       └ NotificationCard×N  │  气泡卡片 + 动画
 └─────────────────────────────┘
               ├─→ 屏幕四角气泡
-              └─→ SetThreadExecutionState（阻止/恢复自动睡眠）
+              └─→ SetThreadExecutionState（阻止/恢复自动睡眠与关屏）
 ```
 
 **进程模型**：
@@ -468,15 +501,15 @@ Get-Content "$env:TEMP\oc-notify-plugin.log" -Tail 50
 - 不用 `bun:ffi` 直调 Win32（原生崩溃无法 try-catch，曾导致 TUI 挂掉）
 - 判定粒度仅到**窗口**级，同一 WT 窗口内的多个标签页无法区分 → 见[已知局限](#已知局限)
 
-### 防休眠的实现分工
+### 防休眠 / 不息屏的实现分工
 
-- **决策在插件**：期望值**每次从 `inflight` 集合现场求值**（`busy → add`，`idle → delete`），不维护第二套计数器，避免与忙闲状态漂移
+- **决策在插件**：期望值**每次从 `inflight` 集合现场求值**（`busy → add`，`idle → delete`），不维护第二套计数器，避免与忙闲状态漂移；`preventSleep` 与 `preventScreenOff` 任一开启都会请求 hold
 - **调用点恰好覆盖 `inflight` 的全部变更处**：busy 分支、`onIdle` 里 `delete` 之后且早于所有提前 `return`、60s `gcTimer` 心跳、`dispose`
 - **心跳是幂等重发**：期望未变时 exe 侧不调 Win32 API，所以重发**绝不会**把还在跑的长任务误释放
-- **执行在 exe**：一条专用线程调 `SetThreadExecutionState`（线程级 API，持有人与清除人必须是同一线程）
-- **exe 侧独立否决**：即便插件还在请求，配置改成 `false` 也立即释放（`ConfigService.ConfigChanged` 驱动）
+- **执行在 exe**：一条专用线程调 `SetThreadExecutionState`（线程级 API，持有人与清除人必须是同一线程）；`preventScreenOff` 追加 `ES_DISPLAY_REQUIRED`，并强制包含 `ES_SYSTEM_REQUIRED`
+- **exe 侧独立否决**：即便插件还在请求，两个开关都改成 `false` 也会立即释放（`ConfigService.ConfigChanged` 驱动）；`preventScreenOff` 开启时 `preventSleep=false` 不构成否决
 
-配置项与使用方式详见[防休眠 preventSleep](#防休眠-preventsleep)。
+配置项与使用方式详见[防休眠 preventSleep](#防休眠-preventsleep) 与 [对话中不息屏 preventScreenOff](#对话中不息屏-preventscreenoff)。
 
 ### 单实例与空闲退出
 
@@ -496,8 +529,8 @@ Get-Content "$env:TEMP\oc-notify-plugin.log" -Tail 50
 | 语义 | opencode1 事件 | opencode2 事件 | 处理 |
 |------|----------------|----------------|------|
 | 缓存 title / parentID | `session.created` / `session.updated` | `ctx.data.session`（TUI 数据层） | 取 title、判 subagent |
-| busy 开始 | `session.status`（busy） | `session.execution.started` | 记**首次**时间戳（不覆盖）+ `syncPower()` 请求防休眠 |
-| 一轮完成 | `session.idle` | `session.execution.succeeded` | `syncPower()` 释放防休眠 → error 抑制 → 短任务过滤 → 取 title → emit |
+| busy 开始 | `session.status`（busy） | `session.execution.started` | 记**首次**时间戳（不覆盖）+ `syncPower()` 请求防休眠/不息屏 |
+| 一轮完成 | `session.idle` | `session.execution.succeeded` | `syncPower()` 释放电源保持 → error 抑制 → 短任务过滤 → 取 title → emit |
 | 打断/终止 | （并入 idle） | `session.execution.interrupted` | `shutdown`/`superseded` 静默跳过，其余同完成路径 |
 | 会话错误 | `session.error` | `session.execution.failed` | 记时间戳 + 立即 emit（V2 中 failed 为终态，需自行释放 busy） |
 | 权限请求 | `permission.updated` / `permission.asked` | `permission.asked` | 300ms 消抖后 emit |
@@ -608,8 +641,10 @@ Start-Process "$env:USERPROFILE\.config\opencode\assets\OcNotify\OcNotify.exe"
 - [ ] 开两个 opencode，关掉一个 → exe 不退；全关 → 约 60s 后 exe 退出
 - [ ] 重复启动 exe → 只存活一个进程
 - [ ] `preventSleep: true` + 会话 busy → `powercfg /requests` 出现 `[PROCESS] OcNotify.exe`
+- [ ] `preventScreenOff: true` + 会话 busy → 同上条目同时包含 `SYSTEM` 与 `DISPLAY`
+- [ ] `preventScreenOff: true` + `preventSleep: false` → 仍持有电源请求（强制开启生效）
 - [ ] 会话 idle 后 ≤120s 该条目消失；运行中改回 `false` → 1s 内消失
-- [ ] 防休眠开启期间 exe CPU 占用保持低位（PowerGuard 专用线程 5s 轮询，不得空转）
+- [ ] 电源请求开启期间 exe CPU 占用保持低位（PowerGuard 专用线程 5s 轮询，不得空转）
 
 ### 关键设计约定
 
@@ -715,18 +750,18 @@ oc-notify/
 
 `collectAncestorPids` 只在插件 init 时执行。若 opencode 所属的终端窗口被重建（关闭重开 WT、终端宿主重启等），PID 集合即失效，检测退化为「仅 opencode 自身 PID 命中才算前台」，多数情况下会**放行**——表现为比预期更吵，而非更静。重开 opencode 即可恢复。
 
-### 防休眠只跟随会话忙闲，不判断你是否在敲键盘
+### 防休眠 / 不息屏只跟随会话忙闲，不判断你是否在敲键盘
 
-`preventSleep` 的判定依据是 opencode 的 `session.status`（busy / idle），**不感知 Windows 层面的用户输入**。由此有几个边界：
+`preventSleep` / `preventScreenOff` 的判定依据是 opencode 的 `session.status`（busy / idle），**不感知 Windows 层面的用户输入**。由此有几个边界：
 
 | 场景 | 结果 |
 |------|------|
-| AI 正在跑长构建，你在旁边盯着 | ✅ 保持唤醒（正是目标场景） |
-| AI 跑完了，你去厨房泡茶，机器按 10min 设置入睡 | ✅ 正常睡（正是预期） |
-| AI 已 idle，但你在 TUI 里手动敲 `!npm run build` 这类**不计入 session busy** 的长命令 | ❌ 不保持唤醒，机器仍会按系统设置入睡 |
+| AI 正在跑长构建，你在旁边盯着 | ✅ 保持唤醒/屏幕常亮（正是目标场景） |
+| AI 跑完了，你去厨房泡茶，机器按 10min 设置入睡/关屏 | ✅ 正常睡/关屏（正是预期） |
+| AI 已 idle，但你在 TUI 里手动敲 `!npm run build` 这类**不计入 session busy** 的长命令 | ❌ 不保持唤醒/不息屏，机器仍会按系统设置入睡/关屏 |
 | 笔记本 Modern Standby 模式下开着一场长会话 | ⚠️ 会显著耗电（合盖也不睡） |
 
-第三行是唯一的实际缺口：`!` 前缀命令是否推进 session 状态取决于 opencode 版本。若你的长任务主要靠 `!` 命令驱动，请把系统睡眠时间调长，或在该时段手动保持唤醒。
+第三行是唯一的实际缺口：`!` 前缀命令是否推进 session 状态取决于 opencode 版本。若你的长任务主要靠 `!` 命令驱动，请把系统睡眠/关屏时间调长，或在该时段手动保持唤醒。
 
 此外 `ES_SYSTEM_REQUIRED` 只挡**自动**休眠。若系统的隐藏电源项 `AllowSystemRequired`（`powercfg` 别名 `SYSTEMREQUIRED`）被设为 0，应用级请求会被系统忽略；该项默认值为 1，正常机器不受影响。
 

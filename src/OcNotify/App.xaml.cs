@@ -57,7 +57,8 @@ public partial class App : Application
             _manager = new NotificationManager(Dispatcher, _configService);
             _pipeServer = new PipeServer();
 
-            // 电源请求守卫：behavior.preventSleep 开启且会话忙碌时阻止系统自动休眠
+            // 电源请求守卫：behavior.preventSleep / preventScreenOff 开启且会话忙碌时
+            // 阻止系统自动休眠（后者同时保持屏幕常亮）
             _powerGuard = new PowerGuard(_configService);
 
             // 管道消息分发：电源控制消息不进通知队列（它是控制指令，不该产生气泡），
